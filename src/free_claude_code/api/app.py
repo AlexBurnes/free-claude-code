@@ -1,6 +1,6 @@
 """Pure FastAPI application factory."""
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -14,6 +14,7 @@ from free_claude_code.application.code_sessions import (
     CodeValidationError,
 )
 from free_claude_code.application.errors import ApplicationError
+from free_claude_code.config.profiles import ProfileStore
 from free_claude_code.core.anthropic import anthropic_error_payload
 from free_claude_code.core.diagnostics import (
     redacted_exception_traceback,
@@ -29,7 +30,10 @@ from free_claude_code.core.version import package_version
 from .admin_cache import AdminNoStoreMiddleware, attach_admin_no_store
 from .admin_routes import router as admin_router
 from .code_sessions_routes import router as code_router
+from .dependencies import require_anthropic_proxy_auth
 from .ports import ApiServices
+from .profile_routes import ProfileSessions, get_profile_session
+from .profile_routes import router as profile_router
 from .request_errors import ordinary_application_error_response
 from .request_ids import (
     RequestCorrelationMiddleware,
@@ -42,10 +46,13 @@ from .routes import router
 from .validation_log import summarize_request_validation_body
 
 
-def create_app(services: ApiServices) -> FastAPI:
+def create_app(
+    services: ApiServices, *, profile_store: ProfileStore | None = None
+) -> FastAPI:
     """Create the HTTP adapter around explicitly supplied runtime services."""
     app = FastAPI(title="Claude Code Proxy", version=package_version())
     app.state.services = services
+    app.state.profile_sessions = ProfileSessions(profile_store or ProfileStore())
     app.add_middleware(AdminNoStoreMiddleware)
     app.add_middleware(ClientRequestLifetimeMiddleware)
     app.add_middleware(RequestOutcomeMiddleware)
@@ -54,6 +61,15 @@ def create_app(services: ApiServices) -> FastAPI:
     app.include_router(admin_router)
     app.include_router(code_router)
     app.include_router(router)
+    app.include_router(profile_router)
+    app.include_router(
+        router,
+        prefix="/fcc/sessions/{session_id}",
+        dependencies=[
+            Depends(require_anthropic_proxy_auth),
+            Depends(get_profile_session),
+        ],
+    )
 
     @app.exception_handler(CodeError)
     async def code_error_handler(request: Request, exc: CodeError):
@@ -95,6 +111,16 @@ def create_app(services: ApiServices) -> FastAPI:
             message_summary=message_summary,
             tool_names=tool_names,
         )
+        if request.url.path.startswith(("/admin/api/profiles", "/api/launch-sessions")):
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "detail": [
+                        {key: error[key] for key in ("type", "loc", "msg")}
+                        for error in exc.errors()
+                    ]
+                },
+            )
         return await request_validation_exception_handler(request, exc)
 
     @app.exception_handler(ApplicationError)
@@ -103,7 +129,9 @@ def create_app(services: ApiServices) -> FastAPI:
         return ordinary_application_error_response(
             exc,
             wire_api=(
-                "responses" if request.url.path == "/v1/responses" else "messages"
+                "responses"
+                if request.url.path.endswith("/v1/responses")
+                else "messages"
             ),
             request_id=get_request_id(request),
         )
@@ -131,7 +159,7 @@ def create_app(services: ApiServices) -> FastAPI:
                     type(exc).__name__,
                 )
             message = safe_exception_message(exc)
-            if request.url.path == "/v1/responses":
+            if request.url.path.endswith("/v1/responses"):
                 content = openai_error_payload(message=message, error_type="api_error")
             else:
                 content = anthropic_error_payload(

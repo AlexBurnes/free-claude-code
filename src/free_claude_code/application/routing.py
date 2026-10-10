@@ -148,6 +148,13 @@ class ModelRouter:
 
     def _target(self, provider_id: str, provider_model: str) -> ProviderModelTarget:
         self._validate_provider_id(provider_id)
+        self._validate_profile_model(f"{provider_id}/{provider_model}")
+        logger.info(
+            "FCC routing candidate: profile={} provider={} model={}",
+            getattr(self._settings, "routing_profile_name", "default"),
+            provider_id,
+            provider_model,
+        )
         return ProviderModelTarget(
             provider_id=provider_id,
             provider_model=provider_model,
@@ -181,6 +188,8 @@ class ModelRouter:
             if decoded is not None
             else model_name
         )
+        if "/" in candidate:
+            self._validate_profile_model(candidate)
         if is_retired_model_ref(candidate):
             return (
                 parse_provider_type(self._settings.model),
@@ -217,6 +226,13 @@ class ModelRouter:
         if not provider_model:
             return None, None, False
         return provider_id, provider_model, False
+
+    def _validate_profile_model(self, model_ref: str) -> None:
+        allowed = getattr(self._settings, "routing_allowed_models", None)
+        if allowed is not None and model_ref not in allowed:
+            raise InvalidRequestError(
+                f"Model is outside profile {getattr(self._settings, 'routing_profile_name', 'default')!r}: {model_ref}"
+            )
 
     def _resolve_model_ref(self, claude_model_name: str) -> str:
         """Resolve a Claude model name to the configured provider/model ref."""

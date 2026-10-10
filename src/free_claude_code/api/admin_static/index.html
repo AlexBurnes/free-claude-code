@@ -24,7 +24,7 @@
           </a>
           <div>
             <h1>Free Claude Code</h1>
-            <p>Server Control · v__FCC_VERSION__</p>
+            <p>Server Control · v__FCC_DISPLAY_VERSION__</p>
           </div>
         </div>
         <nav id="sectionNav" class="section-nav" aria-label="Admin views"></nav>
@@ -54,6 +54,34 @@
               class="form-sections"
               aria-label="Model configuration"
             ></div>
+          </section>
+
+          <section id="view-profile_config" class="admin-view" data-view="profile_config" hidden>
+            <section class="settings-section">
+              <div class="section-heading"><div><h3>Saved routing profiles</h3><p>Choose models, reasoning and fallbacks for future launches. Saving or deleting a profile leaves existing sessions unchanged.</p></div></div>
+              <p>Provider credentials and connected accounts are shared. Manage them in Providers.</p>
+              <div class="profile-toolbar">
+                <div class="field"><label for="profileSelect">Profile to edit</label><select id="profileSelect" disabled><option>Loading profiles…</option></select></div>
+                <button id="createProfile" class="secondary-button" type="button" disabled>Create profile</button>
+                <button id="duplicateProfile" class="secondary-button" type="button" disabled>Duplicate profile</button>
+                <button id="reloadProfiles" class="ghost-button" type="button">Reload profiles</button>
+              </div>
+              <p id="profileDefaultNotice">Default uses Model Config and applies when launching without a profile.</p>
+              <button id="editDefaultProfile" class="secondary-button" type="button">Edit default in Model Config</button>
+              <div id="profileEditor" hidden>
+                <h3 id="profileEditorTitle"></h3>
+                <p>Empty tier choices use this profile's base model.</p>
+                <div id="profileFields" class="field-grid"></div>
+                <div class="profile-actions">
+                  <span id="profileDirtyState" role="status">No changes</span>
+                  <button id="discardProfileChanges" class="secondary-button" type="button" disabled>Discard changes</button>
+                  <button id="saveProfile" class="primary-button" type="button" disabled>Save profile</button>
+                  <button id="deleteProfile" class="ghost-button" type="button">Delete profile</button>
+                </div>
+                <p id="profileLaunchHint"></p>
+              </div>
+              <div id="profileMessage" class="message-area" role="status" aria-live="polite"></div>
+            </section>
           </section>
 
           <section id="view-messaging" class="admin-view" data-view="messaging" hidden>
@@ -248,6 +276,22 @@
     <script src="/admin/assets/__FCC_VERSION__/model_combobox.js"></script>
     <script src="/admin/assets/__FCC_VERSION__/session_ui.js"></script>
     <script src="/admin/assets/__FCC_VERSION__/code_sessions.js"></script>
+    <dialog id="profileNameDialog" class="integration-dialog" aria-labelledby="profileNameTitle">
+      <form id="profileNameForm">
+        <h3 id="profileNameTitle">Create profile</h3>
+        <div class="field"><label for="profileName">Profile name</label><input id="profileName" type="text" required pattern="[a-z][a-z0-9_\-]{0,63}" maxlength="64" autocomplete="off" aria-describedby="profileNameHelp" /></div>
+        <p id="profileNameHelp">Start with a lowercase letter. Use lowercase letters, numbers, underscores or hyphens, up to 64 characters. “default” is reserved.</p>
+        <p id="profileNameError" class="message-area error" role="alert"></p>
+        <div class="profile-actions"><button id="cancelProfileName" class="secondary-button" type="button">Cancel</button><button id="submitProfileName" class="primary-button" type="submit">Create profile</button></div>
+      </form>
+    </dialog>
+    <dialog id="profileDeleteDialog" class="integration-dialog" aria-labelledby="profileDeleteTitle">
+      <h3 id="profileDeleteTitle">Delete saved profile?</h3>
+      <p id="profileDeleteDescription"></p>
+      <p>Existing sessions keep their settings. Future launches cannot select this profile.</p>
+      <div class="profile-actions"><button id="cancelProfileDelete" class="secondary-button" type="button">Cancel</button><button id="confirmProfileDelete" class="primary-button" type="button">Delete profile</button></div>
+    </dialog>
+    <script src="/admin/assets/__FCC_VERSION__/profiles.js"></script>
     <script src="/admin/assets/__FCC_VERSION__/admin.js"></script>
   </body>
 </html>

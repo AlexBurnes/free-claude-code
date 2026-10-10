@@ -17,6 +17,8 @@ from free_claude_code.core.request_outcomes import (
     record_request_failure,
 )
 
+from .profile_paths import inference_path
+
 _FAILURE_EVENTS = frozenset({"error", "response.error", "response.failed"})
 
 
@@ -42,7 +44,8 @@ class RequestOutcomeMiddleware:
         if (
             scope["type"] != "http"
             or scope.get("method") != "POST"
-            or scope.get("path") not in {"/v1/messages", "/v1/responses"}
+            or inference_path(scope.get("path", ""))
+            not in {"/v1/messages", "/v1/responses"}
         ):
             await self._app(scope, receive, send)
             return
@@ -115,8 +118,9 @@ class RequestOutcomeMiddleware:
             logger.bind(
                 event="request.completed",
                 wire_api="responses"
-                if scope["path"] == "/v1/responses"
+                if inference_path(scope["path"]) == "/v1/responses"
                 else "messages",
+                profile=scope.get("state", {}).get("fcc_profile_name", "default"),
                 provider_id=outcome.provider_id,
                 model=outcome.model,
                 status_code=status_code,

@@ -1,5 +1,6 @@
 """Local admin UI routes and APIs."""
 
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 
@@ -56,6 +57,7 @@ _ADMIN_ASSET_FILENAMES = frozenset(
         "session_layout.css",
         "session_ui.js",
         "model_combobox.js",
+        "profiles.js",
         *(
             f"providers/{provider.logo_filename}"
             for provider in PROVIDER_CATALOG.values()
@@ -100,13 +102,19 @@ def _asset_response(filename: str) -> FileResponse:
 
 def admin_page_response() -> HTMLResponse:
     template = _asset_path("index.html").read_text(encoding="utf-8")
+    version = package_version()
+    release_version = re.match(r"\d+\.\d+\.\d+", version)
     return HTMLResponse(
-        template.replace(_ADMIN_ASSET_VERSION_PLACEHOLDER, package_version())
+        template.replace(_ADMIN_ASSET_VERSION_PLACEHOLDER, version).replace(
+            "__FCC_DISPLAY_VERSION__",
+            release_version[0] if release_version else version,
+        )
     )
 
 
 @router.get("/admin", include_in_schema=False)
 @router.get("/admin/model_config", include_in_schema=False)
+@router.get("/admin/profile_config", include_in_schema=False)
 @router.get("/admin/messaging", include_in_schema=False)
 @router.get("/admin/integrations", include_in_schema=False)
 def admin_page(request: Request):

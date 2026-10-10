@@ -262,11 +262,12 @@ async def test_streamed_authentication_error_has_authentication_status(
     "package_version,client_version",
     [
         ("6.5.9", "6.5.9"),
-        ("6.5.9.dev0", "6.5.9-dev.0"),
-        ("6.5.9.dev3+gb89b44b2a", "6.5.9-dev.3+gb89b44b2a"),
-        ("6.5.9.dev3+gb89b44b2a.d20260930", "6.5.9-dev.3+gb89b44b2a.d20260930"),
-        ("6.5.9+d20260930", "6.5.9+d20260930"),
-        ("dev", "0.0.0-dev"),
+        ("6.5.9.dev0", "6.5.9"),
+        ("6.5.9.dev3+gb89b44b2a", "6.5.9"),
+        ("6.5.9.dev3+gb89b44b2a.d20260930", "6.5.9"),
+        ("6.5.9+d20260930", "6.5.9"),
+        ("6.10.5.dev0+ga2e9c4748.d20261010", "6.10.5"),
+        ("dev", "0.0.0"),
     ],
 )
 async def test_model_discovery_formats_package_version_for_upstream(

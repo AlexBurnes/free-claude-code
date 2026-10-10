@@ -19,6 +19,12 @@ from free_claude_code.harnesses.resources import LaunchResources
 
 from .catalog_http import fetch_proxy_model_catalog
 from .common import preflight_proxy, resolve_client_binary, run_client_process
+from .profiles import (
+    BoundLaunchSession,
+    close_launch_session,
+    create_launch_session,
+    extract_fcc_profile,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +101,10 @@ def launch_harness(spec: HarnessSpec, argv: Sequence[str] | None = None) -> None
     base_env = dict(os.environ)
     auth_token = base_env.get("ANTHROPIC_AUTH_TOKEN", "")
     stage = "load settings"
+    binding: BoundLaunchSession | None = None
+    unbound_proxy_root_url = ""
     try:
+        selected_profile, args = extract_fcc_profile(args)
         binary_path = resolve_client_binary(
             binary_name=spec.binary_name,
             display_name=spec.display_name,
@@ -114,11 +123,19 @@ def launch_harness(spec: HarnessSpec, argv: Sequence[str] | None = None) -> None
         if not auth_token:
             raise LaunchError("Free Claude Code proxy authentication token is empty.")
         proxy_root_url = local_proxy_root_url(settings)
+        unbound_proxy_root_url = proxy_root_url
         if error := preflight_proxy(proxy_root_url):
             raise LaunchError(
                 f"Free Claude Code proxy is not reachable at {proxy_root_url}: {error}\n"
                 "Start it in another terminal with: fcc-server"
             )
+        if selected_profile is not None:
+            stage = "bind routing profile"
+            binding = create_launch_session(
+                proxy_root_url, auth_token, selected_profile
+            )
+            proxy_root_url = binding.proxy_root_url
+            settings = binding.configuration.overlay(settings, binding.profile)
         catalog = None
         if spec.catalog_view is not None:
             stage = "prepare model catalog"
@@ -153,3 +170,6 @@ def launch_harness(spec: HarnessSpec, argv: Sequence[str] | None = None) -> None
             message = message.replace(auth_token, "[redacted]")
         print(message, file=sys.stderr)
         raise SystemExit(exc.exit_code if isinstance(exc, LaunchError) else 1) from None
+    finally:
+        if binding is not None:
+            close_launch_session(unbound_proxy_root_url, auth_token, binding.session_id)

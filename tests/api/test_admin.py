@@ -193,6 +193,7 @@ def test_admin_page_uses_installed_version(monkeypatch, tmp_path):
     assert 'href="/admin/assets/9.8.7/admin.css"' in response.text
     assert 'href="/admin/assets/9.8.7/code_sessions.css"' in response.text
     assert 'src="/admin/assets/9.8.7/model_combobox.js"' in response.text
+    assert 'src="/admin/assets/9.8.7/profiles.js"' in response.text
     assert 'src="/admin/assets/9.8.7/form_controls.js"' in response.text
     assert 'src="/admin/assets/9.8.7/code_sessions.js"' in response.text
     assert 'src="/admin/assets/9.8.7/admin.js"' in response.text
@@ -212,6 +213,7 @@ def test_admin_page_uses_installed_version(monkeypatch, tmp_path):
         ("code_sessions.js", "text/javascript"),
         ("session_ui.js", "text/javascript"),
         ("model_combobox.js", "text/javascript"),
+        ("profiles.js", "text/javascript"),
         ("providers/openrouter.svg", "image/svg+xml"),
         ("providers/lightning.png", "image/png"),
     ),
@@ -270,6 +272,7 @@ def test_admin_versioned_logo_reuses_packaged_app_icon(monkeypatch, tmp_path):
         f"/admin/assets/{package_version()}/code_sessions.css",
         f"/admin/assets/{package_version()}/code_sessions.js",
         f"/admin/assets/{package_version()}/model_combobox.js",
+        f"/admin/assets/{package_version()}/profiles.js",
         "/admin/api/config",
     ),
 )

@@ -674,7 +674,8 @@ button.startup-busy::before,
   line-height: 1.4;
 }
 
-.field[data-key="MODEL_FALLBACKS"] {
+.field[data-key="MODEL_FALLBACKS"],
+#profileFields .field[data-key="model_fallbacks"] {
   grid-column: 1 / -1;
 }
 
@@ -952,7 +953,11 @@ button.startup-busy::before,
   }
 
   .model-list-row {
-    grid-template-columns: 1fr repeat(3, auto);
+    grid-template-columns: repeat(3, auto);
+  }
+
+  .model-list-value {
+    grid-column: 1 / -1;
   }
 
   .action-meta {
@@ -985,4 +990,47 @@ button.startup-busy, .startup-spinner { display: inline-flex; align-items: cente
 .startup-spinner[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) {
   button.startup-busy::before, .startup-spinner::before { animation: none; }
+}
+
+.profile-toolbar,
+.profile-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.profile-toolbar {
+  align-items: flex-end;
+}
+
+.profile-toolbar button {
+  min-height: 40px;
+}
+
+.profile-toolbar .field {
+  flex: 1 1 220px;
+}
+
+@media (max-width: 600px) {
+  .profile-toolbar .field {
+    flex-basis: 100%;
+  }
+}
+
+.profile-actions [role="status"] {
+  margin-right: auto;
+}
+
+#profileEditor .field-grid {
+  margin-top: 20px;
+}
+
+#profileNameDialog .field {
+  margin-top: 16px;
+}
+
+#profileMessage {
+  white-space: pre-line;
 }

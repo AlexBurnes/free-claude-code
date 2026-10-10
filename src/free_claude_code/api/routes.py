@@ -43,6 +43,7 @@ from .model_catalog import (
     build_muse_models_list_response,
 )
 from .ports import ApiServices
+from .profile_routes import ProfileSession, get_profile_session
 from .request_errors import ordinary_application_error_response
 from .request_ids import get_request_id
 from .response_streams import bind_response_lifetime
@@ -60,11 +61,17 @@ async def _create_messages_response(
     *,
     request_id: str,
     request_headers: Mapping[str, str] | None = None,
+    session: ProfileSession | None = None,
 ) -> object:
     lease: RequestRuntimeLease | None = None
     try:
         lease = await services.requests.acquire()
-        router = ModelRouter(lease.settings)
+        settings = (
+            session.profile.overlay(lease.settings, session.name)
+            if session
+            else lease.settings
+        )
+        router = ModelRouter(settings)
         raw = (
             request_data.model_dump(mode="json", exclude_unset=True)
             if isinstance(request_data, MessagesRequest)
@@ -96,13 +103,15 @@ async def _create_messages_response(
                     ) from error
             await lease.wait_for_token_estimation()
         handler = MessagesHandler(
-            lease.settings,
+            settings,
             web_tools=services.web_tools,
             provider_resolver=_provider_resolver(lease),
             token_counter=get_token_count,
             generation_id=lease.generation_id,
             request_headers=request_headers,
-            model_info_lookup=lease.model_info,
+            model_info_lookup=session.catalog.cached_model_info
+            if session
+            else lease.model_info,
         )
         if native:
             assert resolved is not None
@@ -135,17 +144,25 @@ async def _create_responses_response(
     *,
     request_id: str,
     request_headers: Mapping[str, str] | None = None,
+    session: ProfileSession | None = None,
 ) -> object:
     lease: RequestRuntimeLease | None = None
     try:
         lease = await services.requests.acquire()
+        settings = (
+            session.profile.overlay(lease.settings, session.name)
+            if session
+            else lease.settings
+        )
         await lease.wait_for_token_estimation()
         handler = ResponsesHandler(
-            lease.settings,
+            settings,
             provider_resolver=_provider_resolver(lease),
             generation_id=lease.generation_id,
             request_headers=request_headers,
-            model_info_lookup=lease.model_info,
+            model_info_lookup=session.catalog.cached_model_info
+            if session
+            else lease.model_info,
         )
         response = await handler.create(request_data, request_id=request_id)
     except ApplicationError as exc:
@@ -174,6 +191,7 @@ async def create_message(
     request_data: Annotated[dict[str, Any], Body()],
     services: ApiServices = Depends(get_services),
     _auth=Depends(require_anthropic_proxy_auth),
+    session: ProfileSession | None = Depends(get_profile_session),
 ):
     """Create a message (JSON by default; stream=true returns Anthropic SSE)."""
     return await _create_messages_response(
@@ -181,6 +199,7 @@ async def create_message(
         cast(JsonObject, request_data),
         request_id=get_request_id(request),
         request_headers=request.headers,
+        session=session,
     )
 
 
@@ -195,6 +214,7 @@ async def create_response(
     request_data: OpenAIResponsesRequest,
     services: ApiServices = Depends(get_services),
     _auth=Depends(require_proxy_auth),
+    session: ProfileSession | None = Depends(get_profile_session),
 ):
     """Create an OpenAI Responses-compatible response through this proxy."""
     return await _create_responses_response(
@@ -202,6 +222,7 @@ async def create_response(
         request_data,
         request_id=get_request_id(request),
         request_headers=request.headers,
+        session=session,
     )
 
 
@@ -216,11 +237,17 @@ async def count_tokens(
     request_data: Annotated[dict[str, Any], Body()],
     services: ApiServices = Depends(get_services),
     _auth=Depends(require_anthropic_proxy_auth),
+    session: ProfileSession | None = Depends(get_profile_session),
 ):
     """Count tokens for a request."""
     lease = await services.requests.acquire()
     try:
-        model_router = ModelRouter(lease.settings)
+        settings = (
+            session.profile.overlay(lease.settings, session.name)
+            if session
+            else lease.settings
+        )
+        model_router = ModelRouter(settings)
         model = request_data.get("model")
         if isinstance(model, str) and not model.strip():
             raise InvalidRequestError("Messages model must not be empty.")
@@ -246,7 +273,7 @@ async def count_tokens(
             ) from error
         await lease.wait_for_token_estimation()
         handler = TokenCountHandler(
-            lease.settings, model_router=model_router, token_counter=get_token_count
+            settings, model_router=model_router, token_counter=get_token_count
         )
         return handler.count(
             counted, request_id=get_request_id(request), resolved=resolved
@@ -264,7 +291,10 @@ async def probe_count_tokens(_auth=Depends(require_anthropic_proxy_auth)):
 async def root(
     settings: Settings = Depends(get_settings),
     _auth=Depends(require_proxy_auth),
+    session: ProfileSession | None = Depends(get_profile_session),
 ):
+    if session is not None:
+        settings = session.catalog.settings
     return {
         "status": "ok",
         "provider": parse_provider_type(settings.model),
@@ -297,10 +327,13 @@ async def list_models(
     x_fcc_model_view: ModelCatalogView | None = Header(default=None),
     services: ApiServices = Depends(get_services),
     _auth=Depends(require_proxy_auth),
+    session: ProfileSession | None = Depends(get_profile_session),
 ):
     """List the model ids this proxy advertises to compatible clients."""
     trace_event(stage="ingress", event="free_claude_code.api.models.list", source="api")
-    snapshot = await services.requests.wait_for_catalog()
+    snapshot = (
+        session.catalog if session else await services.requests.wait_for_catalog()
+    )
     return build_models_list_response(
         snapshot.settings,
         snapshot,
@@ -316,10 +349,13 @@ async def list_models(
 async def list_muse_models(
     services: ApiServices = Depends(get_services),
     _auth=Depends(require_proxy_auth),
+    session: ProfileSession | None = Depends(get_profile_session),
 ):
     """List the direct Responses models expected by Muse Code."""
     trace_event(stage="ingress", event="free_claude_code.api.models.list", source="api")
-    snapshot = await services.requests.wait_for_catalog()
+    snapshot = (
+        session.catalog if session else await services.requests.wait_for_catalog()
+    )
     return build_muse_models_list_response(snapshot.settings, snapshot)
 
 

@@ -34,6 +34,11 @@ def managed_env_path() -> Path:
     return config_dir_path() / FCC_ENV_FILENAME
 
 
+def profiles_path() -> Path:
+    """Return secret-free named routing configuration storage."""
+    return config_dir_path() / "profiles.json"
+
+
 def config_lock_path() -> Path:
     """Return the cross-process managed-config migration lock path."""
 

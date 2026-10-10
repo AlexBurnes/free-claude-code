@@ -41,6 +41,7 @@ def test_cli_scripts_are_registered() -> None:
         "_fcc-update-check": "free_claude_code.updater.check:main",
         "fcc-server": "free_claude_code.cli.entrypoints:serve",
         "fcc-doctor": "free_claude_code.cli.entrypoints:doctor",
+        "fcc-profiles": "free_claude_code.cli.profiles:main",
         "fcc-claude": "free_claude_code.cli.launchers.claude:launch",
         "fcc-codex": "free_claude_code.cli.launchers.codex:launch",
         "fcc-pi": "free_claude_code.cli.launchers.pi:launch",
