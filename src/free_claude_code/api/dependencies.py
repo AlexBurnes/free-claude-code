@@ -48,6 +48,9 @@ def require_proxy_auth(
     settings: Settings = Depends(get_settings),
 ) -> None:
     """Require the configured proxy token as HTTP bearer authorization."""
+    if "session_id" in request.path_params:
+        require_anthropic_proxy_auth(request, settings)
+        return
     if not settings.proxy_auth_enabled:
         return
 

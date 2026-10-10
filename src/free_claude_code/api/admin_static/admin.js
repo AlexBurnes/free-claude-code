@@ -41,6 +41,13 @@ const VIEW_GROUPS = [
     containerId: "modelConfigSections",
   },
   {
+    id: "profile_config",
+    label: "Profile Config",
+    title: "Profile Config",
+    sections: [],
+    containerId: "view-profile_config",
+  },
+  {
     id: "messaging",
     label: "Messaging",
     title: "Messaging",
@@ -100,7 +107,8 @@ async function api(path, options = {}) {
     let detail = "";
     try {
       const payload = await response.json();
-      detail = typeof payload.detail === "string" ? payload.detail : "";
+      detail = typeof payload.detail === "string" ? payload.detail : Array.isArray(payload.detail)
+        ? payload.detail.map((item) => `${(item.loc || []).filter((part) => part !== "body").join(" · ")}: ${item.msg}`).join("\n") : "";
     } catch {
       // The status remains useful when an upstream proxy returns a non-JSON page.
     }
@@ -108,7 +116,7 @@ async function api(path, options = {}) {
     error.status = response.status;
     throw error;
   }
-  return response.json();
+  return response.status === 204 ? null : response.json();
 }
 
 function startupButton(button, loading) {
@@ -229,6 +237,7 @@ async function load({ providersOnly = false } = {}) {
   await Promise.all([
     refreshConnectedAccounts(),
     hydrateModelOptions(),
+    window.FccProfiles.load(),
     providersOnly ? window.CodeSessions.refresh() : window.CodeSessions.initialize(api),
   ]);
   if (state.config !== config) return;
@@ -268,7 +277,7 @@ function setActiveView(viewId, { scroll = false } = {}) {
   document.querySelector(".app-shell").classList.toggle("session-active", sessionActive);
   document.querySelector(".main").classList.toggle("session-main", sessionActive);
   document.querySelector(".topbar").hidden = sessionActive;
-  document.querySelector(".action-bar").hidden = sessionActive || activeView.id === "integrations";
+  document.querySelector(".action-bar").hidden = sessionActive || ["integrations", "profile_config"].includes(activeView.id);
 
   document.querySelectorAll(".nav-link").forEach((link) => {
     const selected = link.dataset.view === activeView.id;
@@ -870,13 +879,13 @@ function renderSections(sections, fields) {
   });
 }
 
-function renderField(field) {
+function renderField(field, { idPrefix = "field" } = {}) {
   const wrapper = document.createElement("div");
   wrapper.className = `field${field.advanced ? " advanced-field" : ""}`;
   wrapper.dataset.key = field.key;
 
   const label = document.createElement("label");
-  label.htmlFor = `field-${field.key}`;
+  label.htmlFor = `${idPrefix}-${field.key}`;
   const labelText = document.createElement("span");
   labelText.textContent = field.label;
   label.appendChild(labelText);
@@ -890,7 +899,7 @@ function renderField(field) {
   }
 
   const input = window.FccFormControls.configure(inputForField(field));
-  input.id = `field-${field.key}`;
+  input.id = `${idPrefix}-${field.key}`;
   input.dataset.key = field.key;
   input.dataset.original = comparableValue(field.value);
   input.dataset.secret = field.secret ? "true" : "false";
@@ -1006,7 +1015,7 @@ function inputForField(field) {
 
 function createModelCombobox(input, field) {
   return new window.FccModelCombobox(input, {
-    listboxId: `model-options-${field.key}`,
+    listboxId: `model-options-${input.id.replace(/^field-/, "")}`,
     label: field.label,
     displayValue: (value) => state.modelLabels.get(value) || value,
     values: () =>
@@ -1028,7 +1037,7 @@ class ModelListEditor {
     this.values = input.value
       ? input.value.split(",").map((value) => value.trim()).filter(Boolean)
       : [];
-    this.inputId = `field-${field.key}-add`;
+    this.inputId = `${input.id}-add`;
 
     this.element = document.createElement("div");
     this.element.className = "model-list-editor";
@@ -1065,17 +1074,22 @@ class ModelListEditor {
   add() {
     const value = this.addInput.value.trim();
     if (!value) {
-      showMessage("Enter a full provider/model fallback.", "error");
+      this.message("Enter a full provider/model fallback.", "error");
       return;
     }
     if (this.values.includes(value)) {
-      showMessage("That fallback model is already in the list.", "error");
+      this.message("That fallback model is already in the list.", "error");
       return;
     }
     this.values.push(value);
     this.addInput.value = "";
-    showMessage("");
+    this.message("");
     this.sync();
+  }
+
+  message(message, kind = "") {
+    if (this.input.closest("#profileFields")) window.FccProfiles.message(message, kind);
+    else showMessage(message, kind);
   }
 
   move(index, offset) {
@@ -1177,7 +1191,7 @@ function comparableValue(value) {
 function changedValues(root = byId("adminViews")) {
   const values = {};
   root.querySelectorAll("[data-key]").forEach((input) => {
-    if (input.disabled || !input.matches("input, select, textarea")) return;
+    if (input.disabled || input.closest("#profileFields") || !input.matches("input, select, textarea")) return;
     const value = readFieldValue(input);
     if (comparableValue(value) !== input.dataset.original) {
       values[input.dataset.key] = value;
@@ -1187,6 +1201,7 @@ function changedValues(root = byId("adminViews")) {
 }
 
 function updateDirtyState() {
+  window.FccProfiles?.updateDirtyState();
   const count = Object.keys(changedValues()).length;
   byId("dirtyState").textContent =
     state.restart ? "Changes saved" : count === 0 ? "No changes" : `${count} unsaved change${count === 1 ? "" : "s"}`;

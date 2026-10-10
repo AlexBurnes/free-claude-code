@@ -6,6 +6,7 @@ __pycache__
 .serena
 .venv
 agent_workspace
+/agent-runtime/
 .env
 /logs/
 server.log

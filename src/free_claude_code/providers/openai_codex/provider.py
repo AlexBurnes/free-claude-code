@@ -208,16 +208,11 @@ class OpenAICodexProvider(BaseProvider):
 
 
 def _model_list_client_version() -> str:
-    """Format FCC's release and VCS development versions for the catalog API."""
+    """Send a numeric release version accepted by the catalog API."""
     if FCC_VERSION == "dev":
-        return "0.0.0-dev"
+        return "0.0.0"
     parsed = Version(FCC_VERSION)
-    formatted = f"{parsed.major}.{parsed.minor}.{parsed.micro}"
-    if parsed.dev is not None:
-        formatted += f"-dev.{parsed.dev}"
-    if parsed.local is not None:
-        formatted += f"+{parsed.local}"
-    return formatted
+    return f"{parsed.major}.{parsed.minor}.{parsed.micro}"
 
 
 async def _endpoint_required() -> str:

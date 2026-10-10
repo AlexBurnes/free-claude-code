@@ -4,6 +4,8 @@ import asyncio
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from .profile_paths import inference_path
+
 _CLIENT_OWNED_PATHS = frozenset(
     {
         "/v1/messages",
@@ -84,7 +86,7 @@ class ClientRequestLifetimeMiddleware:
 
 
 def _owns_client_lifetime(scope: Scope) -> bool:
-    path = scope.get("path")
+    path = inference_path(scope.get("path", ""))
     return scope["type"] == "http" and (
         (scope.get("method") == "POST" and path in _CLIENT_OWNED_PATHS)
         or (
