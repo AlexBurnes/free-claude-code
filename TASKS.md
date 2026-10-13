@@ -4,12 +4,14 @@
 
 - [x] Preserve local edits and merge exact upstream v6.16.0.
 - [x] Resolve profile/configuration/reasoning conflicts and run regression checks.
-- [ ] Refresh fork environment, switch the service to fork and audit live state.
+- [x] Refresh fork environment, switch the service to fork and audit live state.
 - [x] Update version-switching documentation with the merged baseline.
 
 Task ID: fcc-merge-616-2026-10-13. Reuse approved Codex backend/tester roles; coordinator owns Git and production runtime.
 
 Pre-deployment: exact v6.16.0 merge995acd9; pre-merge tracked/untracked edits preserved in stash81daed2f8bd7467d2743fec2b16f57581aa895c2. Seven conflicts resolved; profiles accept legacy strings and frozen model/effort/key-number records, separate onboarding and configurable compact retained. Complete final unit suite9249 passed,9 skipped; isolated Chromium browser suite24 passed. Ruff/format/ty, JS/Bash syntax and whitespace checks pass. Earlier failures were stale reasoning-header expectations, missing updated Chromium and a new mocked-HTTP fixture; corrected before the clean final runs. No live inference performed.
+
+Live acceptance: local merge995acd9 and integration6c54487; selected/active fork build6.16.1.dev3+g6c544870e, PID4174701, single service-owned listener8082, old upstream PID gone. Health/Admin/profile APIs return200; default model openai/gpt-6.1-sol, two profile records loaded. Fork managed settings migrated to schema2; original616 settings slot and OAuth/profile hashes preserved exactly. User autostart enabled, zero invalid systemd env assignments; ordinary fcc-claude --version succeeds. Source stash retained, no GitHub push. Real OpenAI acceptance still requires retrying the reported conversation. Artifacts: agent-runtime/merge-616-{baseline,validation,live-checks}.json.
 
 ## 2026-10-13 — Restart original and review release changes
 
