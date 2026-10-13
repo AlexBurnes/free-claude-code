@@ -11,6 +11,7 @@ from free_claude_code.core.anthropic import ReasoningReplayMode
 from free_claude_code.core.anthropic.models import MessagesRequest
 from free_claude_code.core.anthropic.stream_contracts import parse_sse_text
 from free_claude_code.core.failures import ExecutionFailure, FailureKind
+from free_claude_code.core.history_replay import decode_replay
 from free_claude_code.core.openai_responses.chat_request import (
     build_responses_chat_request,
 )
@@ -376,11 +377,13 @@ async def test_responses_late_cipher_preserves_thinking_and_final_answer():
     assert [
         event.data["index"] for event in events if event.event == "content_block_stop"
     ][-1] == text_index
-    assert [
+    signatures = [
         event.data["delta"]["signature"]
         for event in events
         if event.data.get("delta", {}).get("type") == "signature_delta"
-    ] == ["opaque-original"]
+    ]
+    assert len(signatures) == 1
+    assert decode_replay(signatures[0]).native == original[3]["item"]
 
 
 @pytest.mark.asyncio

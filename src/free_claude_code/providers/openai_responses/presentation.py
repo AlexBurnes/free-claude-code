@@ -5,6 +5,12 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from free_claude_code.core.failures import ExecutionFailure
+from free_claude_code.core.history_replay import (
+    ReplayOrigin,
+    ReplayRecord,
+    encode_replay,
+    is_replay,
+)
 from free_claude_code.core.json_types import JsonObject
 from free_claude_code.core.openai_responses import (
     NativeResponsesRelay,
@@ -44,6 +50,10 @@ class MessagesResponsesPresenter:
 
     def __init__(self, stream: ResponsesProviderStream) -> None:
         self._stream = stream
+        self._replay_origin: ReplayOrigin | None = None
+
+    def set_replay_origin(self, origin: ReplayOrigin) -> None:
+        self._replay_origin = origin
 
     @property
     def completed(self) -> bool:
@@ -56,7 +66,38 @@ class MessagesResponsesPresenter:
     def start(self) -> Iterable[str]:
         return self._stream.start()
 
-    def feed(self, event_type: str, payload: JsonObject) -> Iterable[str]:
+    def feed(
+        self,
+        event_type: str,
+        payload: JsonObject,
+        *,
+        native_payload: JsonObject | None = None,
+    ) -> Iterable[str]:
+        item = payload.get("item")
+        native_item = (native_payload if native_payload is not None else payload).get(
+            "item"
+        )
+        if (
+            event_type == "response.output_item.done"
+            and self._replay_origin is not None
+            and isinstance(item, dict)
+            and isinstance(native_item, dict)
+            and native_item.get("type") == "reasoning"
+            and isinstance(native_item.get("id"), str)
+            and native_item["id"]
+            and isinstance(native_item.get("encrypted_content"), str)
+            and native_item["encrypted_content"]
+            and not is_replay(native_item["encrypted_content"])
+        ):
+            payload = {
+                **payload,
+                "item": {
+                    **item,
+                    "encrypted_content": encode_replay(
+                        ReplayRecord(self._replay_origin, native_item)
+                    ),
+                },
+            }
         return self._stream.feed(event_type, payload)
 
     def terminal_failure(

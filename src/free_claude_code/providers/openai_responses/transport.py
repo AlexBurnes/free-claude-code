@@ -4,6 +4,7 @@ import asyncio
 import sys
 import uuid
 from collections.abc import AsyncIterator, Callable, Mapping
+from copy import deepcopy
 from functools import partial
 from typing import cast
 
@@ -226,7 +227,11 @@ class OpenAIResponsesTransport:
                     JsonObject,
                     cast(
                         ResponseCreateParamsStreaming,
-                        build_responses_provider_request(request, reasoning=reasoning),
+                        build_responses_provider_request(
+                            request,
+                            reasoning=reasoning,
+                            preserve_legacy_encrypted_reasoning=self._supports_reasoning_input_content,
+                        ),
                     ),
                 )
             )
@@ -410,6 +415,8 @@ class OpenAIResponsesTransport:
                     client=client,
                     endpoint=endpoint.snapshot if endpoint is not None else None,
                 )
+                if isinstance(presenter, MessagesResponsesPresenter):
+                    presenter.set_replay_origin(origin)
                 readable_body = prepare_history(body, origin)
                 sent_body = self._prepare_reasoning_input(readable_body)
                 attempt = await execution.open_attempt(operation_kind)
@@ -483,9 +490,27 @@ class OpenAIResponsesTransport:
                             raise stream_failure
                         if context_exceeded:
                             raise context_window_exceeded_provider_failure()
+                        native_payload = payload
                         if adapt_event is not None:
+                            if (
+                                isinstance(presenter, MessagesResponsesPresenter)
+                                and upstream_event.type == "response.output_item.done"
+                            ):
+                                native_payload = {
+                                    **payload,
+                                    "item": deepcopy(payload.get("item")),
+                                }
                             payload = adapt_event(upstream_event.type, payload)
-                        for event in presenter.feed(upstream_event.type, payload):
+                        presented = (
+                            presenter.feed(
+                                upstream_event.type,
+                                payload,
+                                native_payload=native_payload,
+                            )
+                            if isinstance(presenter, MessagesResponsesPresenter)
+                            else presenter.feed(upstream_event.type, payload)
+                        )
+                        for event in presented:
                             for held in recovery.push(event):
                                 yield held
                         if presenter.completed:

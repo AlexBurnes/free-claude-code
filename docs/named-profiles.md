@@ -74,13 +74,19 @@ The public OpenAI Responses schema still permits reasoning `content`, so this co
 
 The error `invalid_encrypted_content` with `Encrypted content item_id did not match the target item id` means the provider cannot verify the encrypted state against the supplied reasoning ID. Older Claude history can contain a raw thinking signature without the original Responses item ID; converting it produces a new ID. Removing plaintext `content` fixes the request schema but cannot restore that lost ID.
 
-FCC now recognizes an explicitly named item in the provider's error even when its ID is not quoted. Before publishing response output, it can retry with only the rejected item replaced by its available readable reasoning or summary as quoted assistant history. If no readable representation exists, that rejected opaque item is omitted. Other encrypted items, valid native replay IDs, visible messages and tool results are preserved. The saved Claude transcript is not edited.
+For the ChatGPT/Codex route, FCC now handles raw signed Claude thinking before sending a request. Such a block has no original Responses ID, so replaying its ciphertext with a newly generated ID is invalid. Readable thinking is retained as ordinary assistant history in the same position. Raw redacted thinking without readable text or an original ID is omitted from the outgoing copy. The saved Claude transcript is not edited. Other Responses endpoints retain their existing legacy handling, and direct native Responses input keeps its supplied ID/cipher pair.
 
-The recovery retains readable history between attempts, including when the provider rejects more than one legacy item. It uses the existing bounded upstream attempt budget (five attempts by default). An unknown or ambiguous named item is not guessed. This is a degraded replay of rejected state, not recovery of the missing original ID or decryption of the signature.
+Fresh Responses reasoning sent to Claude is now stored in an FCC replay envelope containing the original native item and its provider/model/connection scope. A matching next request restores the original ID and ciphertext. When provider/protocol/endpoint/connection scope differs, only readable context is projected; the encrypted state is not reused across incompatible routes. The existing FCC compatibility policy delegates model compatibility within the same connection to the upstream provider. Valid existing FCC envelopes are preserved.
+
+Precise recovery still recognizes explicitly named rejected items, including unquoted IDs, and uses the existing bounded attempt budget (five attempts by default). It does not guess unknown or ambiguous items. The previous item-by-item repair could consume all five attempts on a history with five incompatible blocks before reaching a successful request. The preflight handling avoids those predictable failures without increasing the retry budget.
+
+This error does not by itself mean an API key or OAuth credential is invalid. The reported reason identifies an encrypted reasoning item binding failure. Changing account credentials or adding fallbacks does not recover a lost reasoning ID.
 
 Apply the source update by restarting `fcc-server` as described above, then retry the conversation. Relaunch agents with explicit named profiles using `--resume` after the server restart. Provider acceptance must be checked in the resumed conversation; synthetic tests do not exercise the real encrypted state.
 
-Verified locally on 2026-10-12: 4,096 provider/core/API recovery tests passed with three skipped. Regression fixtures reproduce the ID/cipher mismatch, recover two rejected legacy items within three attempts, and verify bounded retries and preservation of other native items. Reinstating the previous matcher in memory reproduces the reported HTTP 400.
+On 2026-10-13, the reported request `req_fdfa35bda265480da6407da37d2e3bb2` used the default ChatGPT route with `gpt-6.1-sol` and received five HTTP 400 responses. Structural inspection found four raw signed readable thinking blocks and one raw redacted block, without FCC replay envelopes. No transcript text, encrypted content or account secrets were copied into diagnostics.
+
+Verified locally on 2026-10-13: 9,261 unit tests passed, nine skipped; Ruff, formatting and type checks passed. Regression cases cover five-block preflight, fresh readable and opaque reasoning roundtrips, credential/endpoint scope, rotating adapter IDs, unchanged request inputs and bounded native recovery.
 
 ## Local validation
 

@@ -39,6 +39,7 @@ def build_responses_provider_request(
     request: MessagesRequest,
     *,
     reasoning: ReasoningPolicy,
+    preserve_legacy_encrypted_reasoning: bool = True,
 ) -> dict[str, Any]:
     """Build a stateless Responses request without silently dropping fields."""
 
@@ -57,6 +58,7 @@ def build_responses_provider_request(
                     message.content,
                     reasoning_content=message.reasoning_content,
                     tool_names=tool_names,
+                    preserve_legacy_encrypted_reasoning=preserve_legacy_encrypted_reasoning,
                 )
             )
         else:
@@ -178,6 +180,7 @@ def _assistant_items(
     *,
     reasoning_content: str | None,
     tool_names: OpenAIToolNameCodec,
+    preserve_legacy_encrypted_reasoning: bool = True,
 ) -> list[dict[str, Any]]:
     blocks = (
         [{"type": "text", "text": content}] if isinstance(content, str) else content
@@ -228,6 +231,19 @@ def _assistant_items(
         flush_text()
         if kind == "thinking":
             signature = get_block_attr(block, "signature", None)
+            if (
+                not preserve_legacy_encrypted_reasoning
+                and isinstance(signature, str)
+                and signature
+                and not is_replay(signature)
+            ):
+                # Messages carries no original Responses ID for this ciphertext.
+                text = str(get_block_attr(block, "thinking", ""))
+                if text:
+                    items.append(
+                        _assistant_message([{"type": "output_text", "text": text}])
+                    )
+                continue
             item: dict[str, Any] = {
                 "id": new_reasoning_item_id(),
                 "type": "reasoning",
@@ -246,12 +262,16 @@ def _assistant_items(
                 ]
             items.append(item)
         elif kind == "redacted_thinking":
+            data = str(get_block_attr(block, "data", ""))
+            if not preserve_legacy_encrypted_reasoning and not is_replay(data):
+                # No original ID or readable text exists to replay safely.
+                continue
             items.append(
                 {
                     "id": new_reasoning_item_id(),
                     "type": "reasoning",
                     "summary": [],
-                    "encrypted_content": str(get_block_attr(block, "data", "")),
+                    "encrypted_content": data,
                 }
             )
         elif kind == "tool_use":

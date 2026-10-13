@@ -2,25 +2,43 @@
 
 import json
 from copy import deepcopy
+from dataclasses import replace
 from typing import Any
 
 import httpx2
 import pytest
 
 from free_claude_code.core.anthropic.models import MessagesRequest
+from free_claude_code.core.anthropic.stream_contracts import parse_sse_text
 from free_claude_code.core.failures import ExecutionFailure
-from free_claude_code.core.history_replay import ReplayRecord, encode_replay
+from free_claude_code.core.history_replay import (
+    ReplayRecord,
+    decode_replay,
+    encode_replay,
+)
+from free_claude_code.core.json_types import JsonObject
 from free_claude_code.core.openai_responses import OpenAIResponsesRequest
+from free_claude_code.core.openai_responses.provider_stream import (
+    ResponsesProviderStream,
+)
 from free_claude_code.core.reasoning import ReasoningPolicy
 from free_claude_code.core.stream_recovery import ContinuationSeed
+from free_claude_code.providers.github_copilot.responses_events import (
+    CopilotResponsesEvents,
+)
 from free_claude_code.providers.history_replay import replay_origin
 from free_claude_code.providers.openai_codex.provider import OpenAICodexProvider
+from free_claude_code.providers.openai_responses.presentation import (
+    MessagesResponsesPresenter,
+)
 from tests.providers.support import immediate_admission
+from tests.providers.test_history_transports import _saved_reply
 from tests.providers.test_openai_codex_provider import (
     _collect,
     _complete_stream,
     _config,
     _FakeAuth,
+    _sse,
 )
 from tests.providers.test_openai_responses_transport import _client, _transport
 
@@ -143,6 +161,11 @@ def _strict_reply(
             CIPHER: ORIGINAL_REASONING_ID,
             OTHER_CIPHER: OTHER_REASONING_ID,
         }.get(item.get("encrypted_content"))
+        cipher = item.get("encrypted_content")
+        if isinstance(cipher, str) and cipher.startswith("synthetic-legacy-"):
+            expected_id = "rs_original_legacy_" + cipher.removeprefix(
+                "synthetic-legacy-"
+            )
         if (
             item.get("type") == "reasoning"
             and expected_id is not None
@@ -193,7 +216,7 @@ async def test_messages_history_satisfies_codex_wire_schema(
         auth=auth,
         admission=immediate_admission(
             provider_name="OpenAI",
-            max_attempts=1 + int(signature_kind in {"legacy", "redacted"}) + int(retry),
+            max_attempts=1 + int(retry),
         ),
         transport=httpx2.MockTransport(reply),
     )
@@ -213,24 +236,21 @@ async def test_messages_history_satisfies_codex_wire_schema(
     finally:
         await provider.cleanup()
     assert "fixture answer" in output
-    assert len(bodies) == 1 + int(signature_kind in {"legacy", "redacted"}) + int(retry)
+    assert len(bodies) == 1 + int(retry)
     assert auth.recovery_calls == int(retry)
     for body in bodies:
         _assert_conversation(body)
-    if signature_kind in {"legacy", "redacted"}:
-        rejected = bodies[0]["input"][1]
-        assert rejected["encrypted_content"] == CIPHER
-        assert rejected["id"] != ORIGINAL_REASONING_ID
-        assert "content" not in rejected
-    else:
-        assert all(body["input"] == bodies[0]["input"] for body in bodies)
+    assert all(body["input"] == bodies[0]["input"] for body in bodies)
     reasoning = [i for i in bodies[-1]["input"] if i.get("type") == "reasoning"]
     if signature_kind in {"unsigned", "legacy"}:
         assert reasoning == []
         context = bodies[-1]["input"][1]
         assert context["role"] == "assistant"
-        assert THINKING in context["content"]
-        assert context["content"] == THINKING
+        assert context["content"] == (
+            [{"type": "output_text", "text": THINKING}]
+            if signature_kind == "legacy"
+            else THINKING
+        )
     elif signature_kind == "redacted":
         assert reasoning == []
         assert CIPHER not in json.dumps(bodies[-1])
@@ -243,6 +263,348 @@ async def test_messages_history_satisfies_codex_wire_schema(
             assert reasoning[0] == {k: v for k, v in native.items() if k != "content"}
     assert request.model_dump(mode="json") == original
     assert native == original_native
+
+
+@pytest.mark.asyncio
+async def test_five_legacy_blocks_preserve_readable_context_before_first_send() -> None:
+    bodies: list[dict[str, Any]] = []
+    provider = OpenAICodexProvider(
+        _config(),
+        auth=_FakeAuth(),
+        admission=immediate_admission(provider_name="OpenAI"),
+        transport=httpx2.MockTransport(lambda request: _strict_reply(request, bodies)),
+    )
+    native = _native()
+    native.update(id=OTHER_REASONING_ID, encrypted_content=OTHER_CIPHER)
+    origin = replay_origin(
+        "OpenAI",
+        "responses",
+        MODEL,
+        client=provider._client,
+        endpoint=await provider._endpoint().endpoint(),
+    )
+    legacy = [
+        {"type": "redacted_thinking", "data": "synthetic-legacy-0"},
+        *[
+            {
+                "type": "thinking",
+                "thinking": f"Readable legacy {i}",
+                "signature": f"synthetic-legacy-{i}",
+            }
+            for i in range(1, 5)
+        ],
+        {
+            "type": "thinking",
+            "thinking": THINKING,
+            "signature": encode_replay(ReplayRecord(origin, native)),
+        },
+    ]
+    raw = _messages(None).model_dump(mode="json")
+    raw["messages"][1]["content"][:1] = legacy
+    request = MessagesRequest.model_validate(raw)
+    original = request.model_dump(mode="json")
+    try:
+        output = await _collect(provider.stream_messages(request, input_tokens=11))
+    finally:
+        await provider.cleanup()
+    assert "fixture answer" in output
+    assert len(bodies) == 1
+    body = bodies[0]
+    _assert_conversation(body)
+    reasoning = [item for item in body["input"] if item.get("type") == "reasoning"]
+    assert reasoning == [
+        {key: value for key, value in native.items() if key != "content"}
+    ]
+    encoded = json.dumps(body)
+    assert "synthetic-legacy-" not in encoded
+    for i in range(1, 5):
+        assert encoded.count(f"Readable legacy {i}") == 1
+    contexts = body["input"][1:5]
+    assert [item["content"] for item in contexts] == [
+        [{"type": "output_text", "text": f"Readable legacy {i}"}] for i in range(1, 5)
+    ]
+    assert all(item["role"] == "assistant" for item in contexts)
+    assert request.model_dump(mode="json") == original
+
+
+def _fresh_reasoning_stream(
+    native: list[dict[str, Any]], *, rotating: bool = False
+) -> str:
+    message = {
+        "type": "message",
+        "id": "msg_visible",
+        "role": "assistant",
+        "status": "completed",
+        "content": [
+            {"type": "output_text", "text": "I will read it.", "annotations": []}
+        ],
+    }
+    tool = {
+        "type": "function_call",
+        "id": "fc_read",
+        "call_id": CALL_ID,
+        "name": "Read",
+        "arguments": json.dumps(ARGS),
+        "status": "completed",
+    }
+    events: list[tuple[str, dict[str, Any]]] = [
+        (
+            "response.created",
+            {"type": "response.created", "response": {"id": "resp_fresh"}},
+        )
+    ]
+    for index, item in enumerate([*native, message, tool]):
+        events += [
+            (
+                "response.output_item.added",
+                {
+                    "type": "response.output_item.added",
+                    "output_index": index,
+                    "item": {
+                        **item,
+                        "id": f"rs_added_{index}" if rotating else item["id"],
+                        "status": "in_progress",
+                        "content": [],
+                        "summary": [],
+                        "encrypted_content": None,
+                    }
+                    if item["type"] == "reasoning"
+                    else item,
+                },
+            ),
+            (
+                "response.output_item.done",
+                {
+                    "type": "response.output_item.done",
+                    "output_index": index,
+                    "item": item,
+                },
+            ),
+        ]
+        if item["type"] == "message":
+            events.insert(
+                -1,
+                (
+                    "response.output_text.delta",
+                    {
+                        "type": "response.output_text.delta",
+                        "output_index": index,
+                        "item_id": item["id"],
+                        "content_index": 0,
+                        "delta": "I will read it.",
+                    },
+                ),
+            )
+    events.append(
+        (
+            "response.completed",
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_fresh",
+                    "output": [*native, message, tool],
+                    "usage": {"input_tokens": 3, "output_tokens": 2},
+                },
+            },
+        )
+    )
+    return _sse(*events)
+
+
+@pytest.mark.parametrize("scope", ["same", "key", "endpoint", "model"])
+@pytest.mark.parametrize("rotating", [False, True])
+@pytest.mark.asyncio
+async def test_fresh_messages_reasoning_roundtrip_preserves_original_native_pairs(
+    scope: str,
+    rotating: bool,
+) -> None:
+    native = [
+        _native(),
+        {
+            "type": "reasoning",
+            "id": OTHER_REASONING_ID,
+            "status": "completed",
+            "summary": [],
+            "encrypted_content": OTHER_CIPHER,
+            "extension": {"keep": 29},
+        },
+    ]
+    original_native = deepcopy(native)
+    bodies: list[dict[str, Any]] = []
+
+    def reply(request: httpx2.Request) -> httpx2.Response:
+        if not bodies:
+            bodies.append(json.loads(request.content))
+            return httpx2.Response(
+                200,
+                text=_fresh_reasoning_stream(native, rotating=rotating),
+                headers={"Content-Type": "text/event-stream"},
+            )
+        return _strict_reply(request, bodies)
+
+    provider = OpenAICodexProvider(
+        _config(),
+        auth=_FakeAuth(),
+        admission=immediate_admission(provider_name="OpenAI", max_attempts=1),
+        transport=httpx2.MockTransport(reply),
+    )
+    if rotating:
+        provider._responses._event_adapter_factory = CopilotResponsesEvents
+    try:
+        first = MessagesRequest.model_validate(
+            {
+                "model": MODEL,
+                "max_tokens": 1024,
+                "messages": [{"role": "user", "content": "Read the project README."}],
+            }
+        )
+        saved = await _saved_reply(
+            provider.stream_messages(first, input_tokens=11), "messages"
+        )
+        reasoning_blocks = [
+            block
+            for block in saved[0]["content"]
+            if block["type"] in {"thinking", "redacted_thinking"}
+        ]
+        assert [block["type"] for block in reasoning_blocks] == [
+            "thinking",
+            "redacted_thinking",
+        ]
+        for block, item in zip(reasoning_blocks, native, strict=True):
+            field = "signature" if block["type"] == "thinking" else "data"
+            record = decode_replay(block[field])
+            assert record.native == item
+            assert record.origin.model == MODEL
+            if scope in {"key", "endpoint"}:
+                # A saved envelope from another credential/endpoint must downgrade.
+                changed = replace(
+                    record.origin,
+                    **{
+                        "connection"
+                        if scope == "key"
+                        else "endpoint": "synthetic-foreign-scope",
+                    },
+                )
+                block[field] = encode_replay(ReplayRecord(changed, record.native))
+        raw = _messages(None).model_dump(mode="json")
+        raw["messages"][1] = saved[0]
+        if scope == "model":
+            raw["model"] = "gpt-other"
+        request = MessagesRequest.model_validate(raw)
+        original = request.model_dump(mode="json")
+        output = await _collect(provider.stream_messages(request, input_tokens=11))
+        assert "fixture answer" in output
+        assert len(bodies) == 2
+        _assert_conversation(bodies[-1])
+        wire_reasoning = [
+            item for item in bodies[-1]["input"] if item.get("type") == "reasoning"
+        ]
+        if scope in {"same", "model"}:
+            assert wire_reasoning == [
+                {key: value for key, value in item.items() if key != "content"}
+                for item in native
+            ]
+        else:
+            assert wire_reasoning == []
+            wire = json.dumps(bodies[-1])
+            assert THINKING in wire
+            assert CIPHER not in wire and OTHER_CIPHER not in wire
+        assert request.model_dump(mode="json") == original
+    finally:
+        await provider.cleanup()
+    assert native == original_native
+
+
+@pytest.mark.asyncio
+async def test_fresh_native_responses_output_keeps_raw_cipher_and_original_id() -> None:
+    native = [_native()]
+    before = deepcopy(native)
+    provider = OpenAICodexProvider(
+        _config(),
+        auth=_FakeAuth(),
+        admission=immediate_admission(provider_name="OpenAI"),
+        transport=httpx2.MockTransport(
+            lambda _: httpx2.Response(
+                200,
+                text=_fresh_reasoning_stream(native),
+                headers={"Content-Type": "text/event-stream"},
+            )
+        ),
+    )
+    try:
+        request = OpenAIResponsesRequest.model_validate(
+            {"model": MODEL, "input": "hello"}
+        )
+        output = await _collect(provider.stream_responses(request))
+    finally:
+        await provider.cleanup()
+    items = [
+        event.data["item"]
+        for event in parse_sse_text(output)
+        if event.event == "response.output_item.done"
+        and event.data["item"]["type"] == "reasoning"
+    ]
+    assert items == native
+    assert native == before
+
+
+@pytest.mark.parametrize("already_wrapped", [False, True])
+@pytest.mark.asyncio
+async def test_presenter_retains_native_completion_identity_without_mutating_events(
+    already_wrapped: bool,
+) -> None:
+    provider = OpenAICodexProvider(
+        _config(),
+        auth=_FakeAuth(),
+        admission=immediate_admission(provider_name="OpenAI"),
+        transport=httpx2.MockTransport(lambda _: httpx2.Response(500)),
+    )
+    try:
+        origin = replay_origin(
+            "OpenAI",
+            "responses",
+            MODEL,
+            client=provider._client,
+            endpoint=await provider._endpoint().endpoint(),
+        )
+    finally:
+        await provider.cleanup()
+    native = _native()
+    if already_wrapped:
+        native["encrypted_content"] = encode_replay(ReplayRecord(origin, _native()))
+    raw: JsonObject = {
+        "type": "response.output_item.done",
+        "output_index": 0,
+        "item": native,
+    }
+    adapted: JsonObject = {**deepcopy(raw), "item": {**native, "id": "rs_added"}}
+    before_raw, before_adapted = deepcopy(raw), deepcopy(adapted)
+    presenter = MessagesResponsesPresenter(
+        ResponsesProviderStream(
+            message_id="msg_fixture",
+            model=MODEL,
+            input_tokens=11,
+        )
+    )
+    presenter.set_replay_origin(origin)
+    stream = "".join(presenter.start()) + "".join(
+        presenter.feed(
+            "response.output_item.done",
+            adapted,
+            native_payload=raw,
+        )
+    )
+    signatures = [
+        event.data["delta"]["signature"]
+        for event in parse_sse_text(stream)
+        if event.data.get("delta", {}).get("type") == "signature_delta"
+    ]
+    assert len(signatures) == 1
+    assert decode_replay(signatures[0]).native == _native()
+    if already_wrapped:
+        assert signatures[0] == native["encrypted_content"]
+    assert raw == before_raw
+    assert adapted == before_adapted
 
 
 @pytest.mark.parametrize("scoped", [False, True])
@@ -381,7 +743,7 @@ async def test_standard_responses_endpoint_keeps_supported_reasoning_content() -
 
 @pytest.mark.parametrize("max_attempts", [2, 3])
 @pytest.mark.asyncio
-async def test_two_legacy_cipher_failures_recover_in_order_with_bounded_budget(
+async def test_two_native_cipher_failures_recover_in_order_with_bounded_budget(
     max_attempts: int,
 ) -> None:
     bodies: list[dict[str, Any]] = []
@@ -399,16 +761,56 @@ async def test_two_legacy_cipher_failures_recover_in_order_with_bounded_budget(
         ),
         transport=httpx2.MockTransport(reply),
     )
-    raw = _messages(CIPHER).model_dump(mode="json")
-    raw["messages"][1]["content"].insert(
-        1, {"type": "thinking", "thinking": OTHER_THINKING, "signature": OTHER_CIPHER}
+    first = {**_native(), "id": "rs_rejected_first", "summary": []}
+    second = {
+        **_native(),
+        "id": "rs_rejected_second",
+        "encrypted_content": OTHER_CIPHER,
+        "content": [{"type": "reasoning_text", "text": OTHER_THINKING}],
+        "summary": [],
+    }
+    request = OpenAIResponsesRequest.model_validate(
+        {
+            "model": MODEL,
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "Read the project README."}
+                    ],
+                },
+                first,
+                second,
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "I will read it."}],
+                },
+                {
+                    "type": "function_call",
+                    "call_id": CALL_ID,
+                    "name": "Read",
+                    "arguments": json.dumps(ARGS),
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": CALL_ID,
+                    "output": "README: safe fixture",
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "Now summarize it."}],
+                },
+            ],
+        }
     )
-    request = MessagesRequest.model_validate(raw)
     original = request.model_dump(mode="json")
 
     async def consume() -> None:
         nonlocal chunks
-        async for chunk in provider.stream_messages(request, input_tokens=11):
+        async for chunk in provider.stream_responses(request):
             chunks += [chunk]
 
     try:
@@ -507,19 +909,24 @@ async def test_targeted_cipher_recovery_keeps_other_native_pair(ingress: str) ->
     finally:
         await provider.cleanup()
     assert "fixture answer" in "".join(chunks)
-    assert len(bodies) == 2
+    assert len(bodies) == (1 if ingress == "messages" else 2)
     expected_other = {k: v for k, v in other.items() if k != "content"}
     assert bodies[0]["input"][2] == expected_other
-    assert bodies[1]["input"][2] == expected_other
+    assert bodies[-1]["input"][2] == expected_other
     expected_context = THINKING
     if ingress == "responses":
         expected_context += "\n\nRead README."
-    assert bodies[1]["input"][1] == {
-        "role": "assistant",
-        "content": expected_context,
-    }
+    assert bodies[-1]["input"][1] == (
+        {"role": "assistant", "content": expected_context}
+        if ingress == "responses"
+        else {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": expected_context}],
+        }
+    )
     assert (
-        bodies[1]["input"][:1] + bodies[1]["input"][2:]
+        bodies[-1]["input"][:1] + bodies[-1]["input"][2:]
         == bodies[0]["input"][:1] + bodies[0]["input"][2:]
     )
     assert request.model_dump(mode="json") == original

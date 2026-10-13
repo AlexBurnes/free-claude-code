@@ -6,6 +6,7 @@ from copy import deepcopy
 import pytest
 
 from free_claude_code.core.anthropic.stream_contracts import parse_sse_text
+from free_claude_code.core.history_replay import decode_replay
 from free_claude_code.core.json_types import JsonObject
 from free_claude_code.providers.kilo import KiloProvider
 from free_claude_code.providers.openai_chat.reasoning_details import (
@@ -221,7 +222,18 @@ async def test_independent_native_items_keep_their_own_text_and_signature():
         for block in saved[0]["content"]
         if block["type"] == "thinking"
     ]
-    assert thinking == [("Alpha.", "cipher-a"), ("Beta.", "cipher-b")]
+    assert [text for text, _ in thinking] == ["Alpha.", "Beta."]
+    expected = {
+        event["item"]["id"]: event["item"]
+        for event in upstream
+        if event["type"] == "response.output_item.done"
+        and event["item"]["type"] == "reasoning"
+    }
+    assert {
+        record.native["id"]: record.native
+        for _, signature in thinking
+        for record in [decode_replay(signature)]
+    } == expected
 
 
 @pytest.mark.asyncio
@@ -233,11 +245,16 @@ async def test_native_signed_empty_thinking_keeps_its_block_kind():
         saved = await _saved_reply(
             send("messages", [{"role": "user", "content": "hello"}]), "messages"
         )
-    assert saved[0]["content"][0] == {
-        "type": "thinking",
-        "thinking": "",
-        "signature": "empty-signed",
-    }
+    block = saved[0]["content"][0]
+    assert block["type"] == "thinking"
+    assert block["thinking"] == ""
+    native = next(
+        event["item"]
+        for event in upstream
+        if event["type"] == "response.output_item.done"
+        and event["item"]["type"] == "reasoning"
+    )
+    assert decode_replay(block["signature"]).native == native
 
 
 @pytest.mark.asyncio

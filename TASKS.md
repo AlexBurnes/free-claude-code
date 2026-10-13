@@ -74,3 +74,12 @@ Validation: full unit run 8567 passed, 8 skipped, one stale VSCode mock signatur
 - [x] Document the fix and rollout instructions.
 
 Validation: 244 provider/history/recovery tests and 418 Responses conversion tests passed (662 total), including nine new regression cases. Bypassing the normalization in memory reproduced HTTP 400 on input[1].content in the raw encrypted-history test; no source changes were made for this negative control. Ruff lint/format, full ty and git diff whitespace checks passed. Request logs and transcript structure identify raw signed thinking as the failing replay shape; tests also cover FCC replay envelopes, auth retry, continuation and unchanged standard Responses behavior. Live service was not restarted and live provider acceptance was not exercised. Rollout instructions are in docs/named-profiles.md.
+
+## 2026-10-13 — Continued encrypted reasoning failure after merge
+
+- [x] Trace req_fdfa35bda265480da6407da37d2e3bb2 and safe history structure.
+- [x] Reproduce actual failure shape and fix provider replay boundary.
+- [x] Verify preservation of valid native reasoning and tool/message history.
+- [ ] Deploy verified fork fix and document live acceptance limits.
+
+Validation for continued encrypted reasoning fix: full suite 9261 passed, 9 skipped; Ruff/format/ty and suppression checks pass. Negative control: five raw legacy records exhaust five sends with no public output; six sends succeed. New preflight succeeds on first send. Fresh readable/opaque native roundtrip, original ID/cipher before rotating adapter, scoped replay, request immutability and bounded direct-native recovery verified. Real transcript offline probe retains all four readable thinking blocks and tool pairs across37 messages; zero upstream calls. Deployment and real provider acceptance pending.
