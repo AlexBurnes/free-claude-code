@@ -86,6 +86,8 @@ Apply the source update by restarting `fcc-server` as described above, then retr
 
 On 2026-10-13, the reported request `req_fdfa35bda265480da6407da37d2e3bb2` used the default ChatGPT route with `gpt-6.1-sol` and received five HTTP 400 responses. Structural inspection found four raw signed readable thinking blocks and one raw redacted block, without FCC replay envelopes. No transcript text, encrypted content or account secrets were copied into diagnostics.
 
+Live acceptance: after deploying commit `e9a9fb1`, the user confirmed on 2026-10-13 that the fix works. This is user-reported provider acceptance in addition to the local regression checks; the coordinator did not issue additional cloud inference requests.
+
 Verified locally on 2026-10-13: 9,261 unit tests passed, nine skipped; Ruff, formatting and type checks passed. Regression cases cover five-block preflight, fresh readable and opaque reasoning roundtrips, credential/endpoint scope, rotating adapter IDs, unchanged request inputs and bounded native recovery.
 
 ## Local validation
