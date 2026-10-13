@@ -149,6 +149,18 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "FCC_CLAUDE_AUTO_COMPACT_WINDOW",
+        "Claude Auto-compact Window",
+        "models",
+        "number",
+        settings_attr="claude_auto_compact_window",
+        description=(
+            "Leave blank for Claude's automatic window. Optional token count from "
+            "100,000 to 1,000,000; the selected upstream model may support less. "
+            "Restart Claude sessions or reconnect integrations after changing it."
+        ),
+    ),
+    ConfigFieldSpec(
         "REASONING_FABLE",
         "Fable Effort",
         "models",

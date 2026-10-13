@@ -358,6 +358,7 @@ class ApplicationRuntime:
                 commit=publish_commit,
                 reason="admin_apply",
             )
+            self._messaging.update_claude_auto_compact_window()
         self._pending_fields = list(prepared.pending_fields)
         automatic = bool(prepared.pending_fields and self._signal_restart())
         if automatic:

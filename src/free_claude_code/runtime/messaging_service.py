@@ -244,6 +244,7 @@ class MessagingService:
             proxy_root_url=local_proxy_root_url(settings),
             allowed_dirs=allowed_dirs,
             auth_token=settings.proxy_auth_token,
+            auto_compact_window=settings.claude_auto_compact_window,
             log_raw_cli_diagnostics=settings.log_raw_cli_diagnostics,
             log_messaging_error_details=settings.log_messaging_error_details,
         )
@@ -278,6 +279,13 @@ class MessagingService:
         if components.startup_notice is not None:
             await workflow.publish_startup_notice(components.startup_notice)
         logger.info("{} platform started with messaging workflow", components.name)
+
+    def update_claude_auto_compact_window(self) -> None:
+        """Apply new intent to future sessions while keeping existing launches stable."""
+        if self._cli_manager is not None:
+            self._cli_manager.auto_compact_window = (
+                self.settings.claude_auto_compact_window
+            )
 
     async def close_delivery(self) -> bool:
         verbose = self.settings.log_api_error_tracebacks

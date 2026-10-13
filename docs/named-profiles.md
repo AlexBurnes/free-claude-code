@@ -2,6 +2,8 @@
 
 Install this fork using [the fork installation guide](fork-installation.md). For automatic Linux startup, see [the systemd user-service guide](systemd-user-service.md).
 
+For model cards, benchmark comparisons and repeatable agent evaluations, see [Choosing models for FCC agents](model-selection.md).
+
 Named profiles save separate model, tier, reasoning and fallback choices. Provider credentials and OAuth connections stay shared in Providers. Existing Model Config is the implicit default; launching without a profile keeps the normal FCC behavior.
 
 ## Save a profile
@@ -11,6 +13,8 @@ Open Profile Config in the Admin UI. Choose Create profile, enter a lowercase na
 Empty tier choices use the profile's base model. Duplicate profile copies the selected saved profile. Discard changes restores saved values, Reload profiles rereads storage, and Delete profile removes a saved entry. Unsaved edits prompt before they are discarded. Edit default in Model Config opens the existing default editor.
 
 Names start with a lowercase letter, contain lowercase ASCII letters, digits, underscores or hyphens, and are at most 64 characters. `default` is reserved. Profiles persist in `~/.fcc/profiles.json`; credentials, endpoints and OAuth tokens are not profile fields.
+
+Claude launches share the optional [auto-compact window setting](claude-context-window.md) in Model Config. It applies to new launches and does not change an already running session.
 
 ## Launch agents
 
@@ -47,6 +51,36 @@ Terminal launchers support profile session URLs. Native Desktop integrations tha
 If OpenAI / ChatGPT reports "Could not load models" while the account remains connected, check the server log for a catalog GET returning HTTP 400. Development package versions with VCS metadata can be rejected as `client_version`; catalog requests must send only the numeric release version, such as `6.10.5`. The fix retains the original package version in diagnostic headers.
 
 Editable installations pick up the source fix after restarting `fcc-server`; no reinstall or account reconnect is required. Refresh the Admin page and its model catalog afterward. Restart agents launched with named profiles because restarting the server clears their session bindings.
+
+### ChatGPT rejects reasoning history with HTTP 400
+
+If a conversation fails with `Invalid 'input[1].content': array too long` and `array_above_max_length`, the ChatGPT/Codex endpoint has rejected a reasoning history item's nonempty `content`. The array index can differ between requests. This is a request-format error, separate from Claude's context-window or auto-compaction warnings.
+
+FCC can encounter this when replaying Claude thinking with an encrypted signature, including older conversations and restored FCC replay records. The ChatGPT route now omits the reasoning item's plaintext `content` after restoring replay history, preserving its encrypted state, ID and summary. Visible messages, tool calls and tool results retain their order. Other Responses providers keep their existing behavior.
+
+Removing fallback models can expose an error on the selected route, but this error alone does not establish that the fallback configuration caused it. Re-adding fallbacks is not required for this fix.
+
+For an editable installation, restart the server to load the change:
+
+```sh
+systemctl --user restart fcc-server.service
+```
+
+Retry the failed request in the existing conversation. Relaunch agents using explicit named profiles after the restart because their server session bindings are cleared; use `--resume` to retain the conversation. For a packaged installation, update FCC from the fixed checkout first, following the [fork installation guide](fork-installation.md).
+
+The public OpenAI Responses schema still permits reasoning `content`, so this compatibility rule applies specifically to the ChatGPT/Codex route. See the [OpenAI SDK reasoning input schema](https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_reasoning_item_param.py) and [reasoning history documentation](https://developers.openai.com/api/docs/guides/reasoning). Verified locally on 2026-10-12: 662 provider, history, recovery and Responses conversion tests passed, including nine new regression cases. Synthetic transport tests verify the request shape; live upstream acceptance requires retrying the conversation against the provider.
+
+### ChatGPT rejects an encrypted reasoning item ID
+
+The error `invalid_encrypted_content` with `Encrypted content item_id did not match the target item id` means the provider cannot verify the encrypted state against the supplied reasoning ID. Older Claude history can contain a raw thinking signature without the original Responses item ID; converting it produces a new ID. Removing plaintext `content` fixes the request schema but cannot restore that lost ID.
+
+FCC now recognizes an explicitly named item in the provider's error even when its ID is not quoted. Before publishing response output, it can retry with only the rejected item replaced by its available readable reasoning or summary as quoted assistant history. If no readable representation exists, that rejected opaque item is omitted. Other encrypted items, valid native replay IDs, visible messages and tool results are preserved. The saved Claude transcript is not edited.
+
+The recovery retains readable history between attempts, including when the provider rejects more than one legacy item. It uses the existing bounded upstream attempt budget (five attempts by default). An unknown or ambiguous named item is not guessed. This is a degraded replay of rejected state, not recovery of the missing original ID or decryption of the signature.
+
+Apply the source update by restarting `fcc-server` as described above, then retry the conversation. Relaunch agents with explicit named profiles using `--resume` after the server restart. Provider acceptance must be checked in the resumed conversation; synthetic tests do not exercise the real encrypted state.
+
+Verified locally on 2026-10-12: 4,096 provider/core/API recovery tests passed with three skipped. Regression fixtures reproduce the ID/cipher mismatch, recover two rejected legacy items within three attempts, and verify bounded retries and preservation of other native items. Reinstating the previous matcher in memory reproduces the reported HTTP 400.
 
 ## Local validation
 

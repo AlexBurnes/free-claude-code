@@ -26,6 +26,7 @@ class ManagedClaudeSessionManager:
         claude_bin: str = CLAUDE_BINARY_NAME,
         *,
         auth_token: str,
+        auto_compact_window: int | None = None,
         log_raw_cli_diagnostics: bool = False,
         log_messaging_error_details: bool = False,
     ):
@@ -42,6 +43,7 @@ class ManagedClaudeSessionManager:
         self.allowed_dirs = allowed_dirs or []
         self.claude_bin = claude_bin
         self.auth_token = auth_token
+        self.auto_compact_window = auto_compact_window
         self._log_raw_cli_diagnostics = log_raw_cli_diagnostics
         self._log_messaging_error_details = log_messaging_error_details
 
@@ -111,6 +113,7 @@ class ManagedClaudeSessionManager:
                 allowed_dirs=self.allowed_dirs,
                 claude_bin=self.claude_bin,
                 auth_token=self.auth_token,
+                auto_compact_window=self.auto_compact_window,
                 log_raw_cli_diagnostics=self._log_raw_cli_diagnostics,
             )
             self._pending_sessions[temp_id] = new_session

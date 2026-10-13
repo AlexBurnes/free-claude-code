@@ -38,6 +38,7 @@ class ManagedClaudeSession:
         claude_bin: str = "claude",
         *,
         auth_token: str,
+        auto_compact_window: int | None = None,
         log_raw_cli_diagnostics: bool = False,
     ):
         self.config = ManagedClaudeConfig(
@@ -46,6 +47,7 @@ class ManagedClaudeSession:
             allowed_dirs=[os.path.normpath(d) for d in (allowed_dirs or [])],
             claude_bin=claude_bin,
             auth_token=auth_token,
+            auto_compact_window=auto_compact_window,
         )
         self.workspace = self.config.workspace_path
         self.proxy_root_url = self.config.proxy_root_url

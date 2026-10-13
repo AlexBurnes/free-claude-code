@@ -621,12 +621,16 @@ class TestManagedClaudeSession:
             assert env["ANTHROPIC_BASE_URL"] == "http://localhost:8082"
 
     @pytest.mark.asyncio
-    async def test_start_task_sets_proxy_auth_token(self):
+    @pytest.mark.parametrize("window", [None, 1000000])
+    async def test_start_task_sets_proxy_auth_token(self, window):
         """Test start_task forwards configured proxy auth to Claude Code."""
         from free_claude_code.cli.managed.session import ManagedClaudeSession
 
         session = ManagedClaudeSession(
-            "/tmp", "http://localhost:8082", auth_token="proxy-token"
+            "/tmp",
+            "http://localhost:8082",
+            auth_token="proxy-token",
+            auto_compact_window=window,
         )
 
         mock_process = AsyncMock()
@@ -647,7 +651,10 @@ class TestManagedClaudeSession:
             env = mock_exec.call_args.kwargs["env"]
             assert env["ANTHROPIC_AUTH_TOKEN"] == "proxy-token"
             assert env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] == "1"
-            assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "190000"
+            if window is None:
+                assert "CLAUDE_CODE_AUTO_COMPACT_WINDOW" not in env
+            else:
+                assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == str(window)
             assert env["DISABLE_TELEMETRY"] == "1"
             assert "ANTHROPIC_API_KEY" not in env
             assert "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" not in env

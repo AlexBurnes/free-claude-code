@@ -19,8 +19,9 @@ from free_claude_code.core.diagnostics import extract_upstream_error_detail
 from free_claude_code.core.failures import ExecutionFailure, FailureKind
 from free_claude_code.core.history_replay import (
     prepare_history,
+    readable_reasoning,
 )
-from free_claude_code.core.json_types import JsonObject
+from free_claude_code.core.json_types import JsonObject, JsonValue
 from free_claude_code.core.openai_responses import (
     OpenAIResponsesRequest,
     ResponsesConversionError,
@@ -112,6 +113,7 @@ class OpenAIResponsesTransport:
         ]
         | None = None,
         omitted_request_fields: frozenset[str] = frozenset(),
+        supports_reasoning_input_content: bool = True,
         tool_policy: ResponsesToolPolicy = ResponsesToolPolicy(),
     ) -> None:
         self._client = client
@@ -119,6 +121,7 @@ class OpenAIResponsesTransport:
         self._event_adapter_factory = event_adapter_factory
         self._request_correction = request_correction
         self._omitted_request_fields = omitted_request_fields
+        self._supports_reasoning_input_content = supports_reasoning_input_content
         self._tool_policy = tool_policy
         self._admission = admission
         self._provider_name = provider_name
@@ -259,6 +262,32 @@ class OpenAIResponsesTransport:
             body.pop(field, None)
         return body
 
+    def _prepare_reasoning_input(self, body: JsonObject) -> JsonObject:
+        """Apply endpoint capabilities after restoring provider-native replay."""
+        items = body.get("input")
+        if self._supports_reasoning_input_content or not isinstance(items, list):
+            return body
+        projected: list[JsonValue] = []
+        for item in items:
+            if not isinstance(item, dict) or item.get("type") != "reasoning":
+                projected.append(item)
+            elif item.get("encrypted_content"):
+                # Opaque state already retains the reasoning; do not duplicate it.
+                projected.append(
+                    {key: value for key, value in item.items() if key != "content"}
+                )
+            elif item.get("content"):
+                projected.extend(
+                    {
+                        "role": "assistant",
+                        "content": text,
+                    }
+                    for text, _ in readable_reasoning(item)
+                )
+            else:
+                projected.append(item)
+        return {**body, "input": projected}
+
     async def _run_stream(
         self,
         body: JsonObject,
@@ -381,7 +410,8 @@ class OpenAIResponsesTransport:
                     client=client,
                     endpoint=endpoint.snapshot if endpoint is not None else None,
                 )
-                sent_body = prepare_history(body, origin)
+                readable_body = prepare_history(body, origin)
+                sent_body = self._prepare_reasoning_input(readable_body)
                 attempt = await execution.open_attempt(operation_kind)
                 scope = ProviderAttemptScope(
                     attempt,
@@ -492,6 +522,11 @@ class OpenAIResponsesTransport:
                             raw_error,
                             body,
                             sent_body=sent_body,
+                            readable_body=(
+                                readable_body
+                                if not self._supports_reasoning_input_content
+                                else None
+                            ),
                             reasoning_error=raw_error,
                             after_common=partial(
                                 self._provider_retry_body, raw_error, body, sent_body

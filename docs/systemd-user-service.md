@@ -40,3 +40,7 @@ systemctl --user disable --now fcc-server.service
 Do not launch a second manual server while the service owns FCC's configured port. FCC also writes its application log to `~/.fcc/logs/server.log`.
 
 After changing your Node.js installation, rerun the installer and restart the service to refresh PATH. After updating FCC, restart the service and refresh Admin. Named-profile agents must be relaunched because server restarts clear their session bindings. Saved profiles and provider connections persist.
+
+## Compare with upstream
+
+To keep an unmodified upstream installation alongside this fork and switch a single service between them, see [the version comparison guide](version-comparison.md). Use its matching launcher dispatcher when testing API errors.

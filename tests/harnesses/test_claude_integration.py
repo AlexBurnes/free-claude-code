@@ -107,7 +107,6 @@ def test_connect_merges_jsonc_and_disconnect_preserves_unrelated_values(tmp_path
         "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
         "CLAUDE_CODE_DISABLE_ADVISOR_TOOL",
         "CLAUDE_CODE_AUTO_MODE_SERVER",
-        "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
         "DISABLE_AUTOUPDATER",
         "DISABLE_FEEDBACK_COMMAND",
         "DISABLE_ERROR_REPORTING",
@@ -117,7 +116,7 @@ def test_connect_merges_jsonc_and_disconnect_preserves_unrelated_values(tmp_path
         "value": TOKEN,
         "extra": "keep",
     }
-    assert entries["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]["value"] == "190000"
+    assert "CLAUDE_CODE_AUTO_COMPACT_WINDOW" not in entries
     assert entries["CLAUDE_CODE_DISABLE_ADVISOR_TOOL"]["value"] == "1"
     assert entries["CLAUDE_CODE_AUTO_MODE_SERVER"]["value"] == "0"
     assert "//" not in path.read_text().replace("http://", "")
@@ -304,3 +303,33 @@ def test_config_root_override(tmp_path, monkeypatch, platform, variable):
     monkeypatch.setattr(claude_integration.sys, "platform", platform)
     monkeypatch.setenv(variable, str(tmp_path))
     assert settings_path() == tmp_path / "Code/User/settings.json"
+
+
+@pytest.mark.parametrize("window", [100000, 1000000])
+def test_optional_compact_window_connect_and_reset_preserve_unrelated_env(
+    tmp_path, window
+):
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps(
+            {
+                ENV: [
+                    {"name": "KEEP", "value": "yes"},
+                    {"name": "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "value": "190000"},
+                ]
+            }
+        )
+    )
+    claude_integration.configure(path, URL, TOKEN, True, auto_compact_window=window)
+    entries = {
+        entry["name"]: entry["value"] for entry in json.loads(path.read_text())[ENV]
+    }
+    assert entries["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == str(window)
+    claude_integration.configure(path, URL, TOKEN, True, auto_compact_window=None)
+    reset = {
+        entry["name"]: entry["value"] for entry in json.loads(path.read_text())[ENV]
+    }
+    assert "CLAUDE_CODE_AUTO_COMPACT_WINDOW" not in reset
+    assert reset["KEEP"] == "yes"
+    operate(path, False)
+    assert json.loads(path.read_text())[ENV] == [{"name": "KEEP", "value": "yes"}]

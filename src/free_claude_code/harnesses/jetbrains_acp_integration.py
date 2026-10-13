@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import cast
 
 from free_claude_code.core.json_types import JsonObject
-from free_claude_code.harnesses.claude import claude_proxy_values
+from free_claude_code.harnesses.claude import (
+    CLAUDE_AUTO_COMPACT_WINDOW_ENV,
+    claude_proxy_values,
+)
 from free_claude_code.harnesses.config_file import atomic_write_text, decode_json
 
 _NAME = "Claude Code (FCC)"
@@ -199,14 +202,17 @@ def _connect(
     previous: JsonObject,
     url: str,
     token: str,
+    auto_compact_window: int | None = None,
 ) -> bool:
     command, args = _launch(previous)
     before = json.dumps(document, allow_nan=False)
     entry = dict(previous)
     entry.update(command=command, args=args)
+    environment = dict(_object(previous.get("env", {})))
+    environment.pop(CLAUDE_AUTO_COMPACT_WINDOW_ENV, None)
     entry["env"] = {
-        **_object(previous.get("env", {})),
-        **claude_proxy_values(url, token),
+        **environment,
+        **claude_proxy_values(url, token, auto_compact_window=auto_compact_window),
         _MARKER: "1",
     }
     agents[_NAME] = entry
@@ -217,21 +223,30 @@ def _connect(
     return True
 
 
-def refresh_connected(path: Path, url: str, token: str) -> bool:
+def refresh_connected(
+    path: Path, url: str, token: str, *, auto_compact_window: int | None = None
+) -> bool:
     path = path.resolve()
     document = _read(path)
     agents, entry = _entry(document)
-    return entry is not None and _connect(path, document, agents, entry, url, token)
+    return entry is not None and _connect(
+        path, document, agents, entry, url, token, auto_compact_window
+    )
 
 
 def configure(
-    path: Path, url: str, token: str, connected: bool | None = None
+    path: Path,
+    url: str,
+    token: str,
+    connected: bool | None = None,
+    *,
+    auto_compact_window: int | None = None,
 ) -> JsonObject:
     path = path.resolve()
     document = _read(path)
     agents, entry = _entry(document)
     if connected is True:
-        _connect(path, document, agents, entry or {}, url, token)
+        _connect(path, document, agents, entry or {}, url, token, auto_compact_window)
     elif connected is False and entry is not None:
         del agents[_NAME]
         atomic_write_text(path, json.dumps(document, indent=2, allow_nan=False) + "\n")

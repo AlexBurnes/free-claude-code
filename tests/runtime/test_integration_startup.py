@@ -260,10 +260,11 @@ async def test_shutdown_drains_integration_writer(runtime, monkeypatch):
     entered, release = threading.Event(), threading.Event()
     write = claude_integration.refresh_connected
 
-    def held(*args):
+    def held(*args, auto_compact_window=None):
+        assert auto_compact_window == runtime.settings.claude_auto_compact_window
         entered.set()
         assert release.wait(5)
-        return write(*args)
+        return write(*args, auto_compact_window=auto_compact_window)
 
     monkeypatch.setattr(claude_integration, "refresh_connected", held)
     close = None

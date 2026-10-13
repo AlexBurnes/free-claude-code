@@ -121,7 +121,11 @@ def replay_origin(
 
 
 def history_retry_body(
-    error: Exception, body: Mapping[str, Any], protocol: HistoryProtocol
+    error: Exception,
+    body: Mapping[str, Any],
+    protocol: HistoryProtocol,
+    *,
+    readable_body: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Repair one explicitly rejected historical record on an independent copy."""
     detail = extract_upstream_error_detail(error)
@@ -161,7 +165,20 @@ def history_retry_body(
         if matched is None:
             continue
         path, original = matched
-        result = deepcopy(dict(body))
+        if readable_body is not None:
+            # Select against the wire, then recover text from the same native item.
+            sources = [
+                entry
+                for entry in _reasoning_records(readable_body, protocol)
+                if (original.get("id") or original.get("encrypted_content"))
+                and entry[1].get("id") == original.get("id")
+                and entry[1].get("encrypted_content")
+                == original.get("encrypted_content")
+            ]
+            if len(sources) != 1:
+                continue
+            path, original = sources[0]
+        result = deepcopy(dict(readable_body if readable_body is not None else body))
         parent: Any = result
         for key in path[:-1]:
             parent = parent[key]
@@ -267,10 +284,14 @@ def _rejected_record(
     identified = [
         entry
         for entry in candidates
-        if isinstance(entry[1].get("id"), str) and f"'{entry[1]['id']}'" in message
+        if isinstance(entry[1].get("id"), str)
+        and re.search(r"(?<![\w-])" + re.escape(entry[1]["id"]) + r"(?![\w-])", message)
     ]
-    if len(identified) == 1:
-        return identified[0]
+    if identified:
+        return identified[0] if len(identified) == 1 else None
+    if re.search(r"\bitem(?:\s+id)?\s+['\"]?[A-Za-z0-9_-]+|rs_[A-Za-z0-9_-]+", message):
+        # A named but unknown item must not fall back to another opaque record.
+        return None
     opaque = [
         entry
         for entry in candidates

@@ -87,6 +87,7 @@ class OpenAICodexProvider(BaseProvider):
             log_raw_sse_events=config.log_raw_sse_events,
             endpoint_transport=self._pool,
             omitted_request_fields=frozenset({"max_output_tokens", "metadata"}),
+            supports_reasoning_input_content=False,
         )
 
     def _endpoint(self, *, session_id: str | None = None) -> CodexEndpointContext:

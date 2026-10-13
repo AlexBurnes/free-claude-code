@@ -39,6 +39,7 @@ RUNTIME_FIELDS = (
     "provider_rate_window",
     "provider_max_concurrency",
     "provider_progress_timeout",
+    "claude_auto_compact_window",
     "http_read_timeout",
     "http_write_timeout",
     "http_connect_timeout",
@@ -215,6 +216,7 @@ def integration_report(settings: Settings) -> dict[str, Any]:
             claude_integration.settings_path(),
             url,
             token,
+            auto_compact_window=settings.claude_auto_compact_window,
         ),
         "codex": lambda: codex_integration.configure(
             codex_integration.config_path(), codex_model_catalog_path(), url
@@ -226,7 +228,10 @@ def integration_report(settings: Settings) -> dict[str, Any]:
             disconnect_path=claude_desktop_disconnect_path(),
         ),
         "jetbrains-acp": lambda: jetbrains_acp_integration.configure(
-            jetbrains_acp_integration.config_path(), url, token
+            jetbrains_acp_integration.config_path(),
+            url,
+            token,
+            auto_compact_window=settings.claude_auto_compact_window,
         ),
     }
     result: dict[str, Any] = {}

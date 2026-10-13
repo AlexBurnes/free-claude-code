@@ -454,7 +454,7 @@ def test_claude_child_env_targets_current_proxy_config() -> None:
     assert env["ANTHROPIC_AUTH_TOKEN"] == "proxy-token"
     assert env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] == "1"
     assert env["CLAUDE_CODE_AUTO_MODE_SERVER"] == "0"
-    assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "190000"
+    assert "CLAUDE_CODE_AUTO_COMPACT_WINDOW" not in env
     assert env["DISABLE_AUTOUPDATER"] == "1"
     assert env["DISABLE_FEEDBACK_COMMAND"] == "1"
     assert env["DISABLE_ERROR_REPORTING"] == "1"
@@ -464,3 +464,21 @@ def test_claude_child_env_targets_current_proxy_config() -> None:
     assert "ANTHROPIC_API_URL" not in env
     assert "ANTHROPIC_API_KEY" not in env
     assert "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" not in env
+
+
+@pytest.mark.parametrize(
+    ("window", "expected"), [(None, "250000"), (100000, "100000"), (1000000, "1000000")]
+)
+def test_claude_optional_window_respects_parent_environment(window, expected):
+    from free_claude_code.harnesses.claude import build_claude_proxy_env
+
+    original = {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "250000", "PATH": "keep"}
+    env = build_claude_proxy_env(
+        proxy_root_url="http://127.0.0.1:8082",
+        auth_token="test-token",
+        base_env=original,
+        auto_compact_window=window,
+    )
+    assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == expected
+    assert original["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "250000"
+    assert env["PATH"] == "keep"

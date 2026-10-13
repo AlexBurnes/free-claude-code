@@ -43,6 +43,7 @@ class ManagedClaudeConfig:
     auth_token: str
     allowed_dirs: list[str] = field(default_factory=list)
     claude_bin: str = CLAUDE_BINARY_NAME
+    auto_compact_window: int | None = None
 
 
 @dataclass(slots=True)
@@ -79,6 +80,7 @@ def build_managed_claude_invocation(
             proxy_root_url=config.proxy_root_url,
             auth_token=config.auth_token,
             base_env=base_env,
+            auto_compact_window=config.auto_compact_window,
         ),
         cwd=config.workspace_path,
         trace_metadata={
@@ -99,6 +101,7 @@ def build_managed_claude_env(
     proxy_root_url: str,
     auth_token: str,
     base_env: Mapping[str, str],
+    auto_compact_window: int | None = None,
 ) -> dict[str, str]:
     """Return a Claude Code task environment that targets the local proxy."""
 
@@ -106,6 +109,7 @@ def build_managed_claude_env(
         proxy_root_url=proxy_root_url,
         auth_token=auth_token,
         base_env=base_env,
+        auto_compact_window=auto_compact_window,
     )
     env["DISABLE_TELEMETRY"] = "1"
     env["TERM"] = "dumb"

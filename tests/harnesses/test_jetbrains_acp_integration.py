@@ -272,3 +272,25 @@ def test_failed_atomic_replace_preserves_existing_config(files, monkeypatch):
     with pytest.raises(PermissionError):
         jb.configure(config, "http://localhost:8082", "token", True)
     assert config.read_bytes() == before
+
+
+def test_optional_compact_window_refresh_clears_legacy_override(files):
+    config, registry, systems = files
+    install(registry, systems)
+    jb.configure(
+        config, "http://localhost:8082", "token", True, auto_compact_window=300000
+    )
+    saved = json.loads(config.read_text())
+    env = saved["agent_servers"]["Claude Code (FCC)"]["env"]
+    assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "300000"
+    env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "190000"
+    env["KEEP"] = "yes"
+    write(config, saved)
+    assert jb.refresh_connected(
+        config, "http://localhost:8082", "token", auto_compact_window=None
+    )
+    refreshed = json.loads(config.read_text())["agent_servers"]["Claude Code (FCC)"][
+        "env"
+    ]
+    assert "CLAUDE_CODE_AUTO_COMPACT_WINDOW" not in refreshed
+    assert refreshed["KEEP"] == "yes"

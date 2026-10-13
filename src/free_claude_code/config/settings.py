@@ -637,6 +637,26 @@ class Settings(BaseModel):
         default=ReasoningPreference.INHERIT,
         validation_alias="REASONING_HAIKU",
     )
+    claude_auto_compact_window: int | None = Field(
+        default=None,
+        ge=100000,
+        le=1000000,
+        validation_alias="FCC_CLAUDE_AUTO_COMPACT_WINDOW",
+    )
+
+    @field_validator("claude_auto_compact_window", mode="before")
+    @classmethod
+    def validate_claude_auto_compact_window(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+            if not value.isascii() or not value.isdecimal():
+                raise ValueError("Claude auto-compact window must be an integer.")
+            return int(value)
+        if value is not None and type(value) is not int:
+            raise ValueError("Claude auto-compact window must be an integer.")
+        return value
 
     # ==================== HTTP Client Timeouts ====================
     http_read_timeout: float = Field(

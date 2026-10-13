@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 from free_claude_code.cli.managed.claude import (
     MANAGED_CLAUDE_MODEL_TIER,
     ManagedClaudeConfig,
@@ -72,7 +74,7 @@ def test_managed_claude_builds_new_task_command_and_env() -> None:
     assert invocation.env["ANTHROPIC_AUTH_TOKEN"] == "proxy-token"
     assert invocation.env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] == "1"
     assert invocation.env["CLAUDE_CODE_DISABLE_ADVISOR_TOOL"] == "1"
-    assert invocation.env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "190000"
+    assert "CLAUDE_CODE_AUTO_COMPACT_WINDOW" not in invocation.env
     assert invocation.env["DISABLE_AUTOUPDATER"] == "1"
     assert invocation.env["DISABLE_FEEDBACK_COMMAND"] == "1"
     assert invocation.env["DISABLE_ERROR_REPORTING"] == "1"
@@ -238,3 +240,19 @@ def test_managed_claude_parser_returns_raw_for_non_object_json() -> None:
     )
 
     assert events == [{"type": "raw", "content": '"not an event"'}]
+
+
+@pytest.mark.parametrize("window", [None, 100000, 1000000])
+def test_managed_claude_propagates_optional_window_to_child(window):
+    config = ManagedClaudeConfig(
+        workspace_path="/tmp",
+        proxy_root_url="http://localhost:8082",
+        auth_token="token",
+        auto_compact_window=window,
+    )
+    invocation = build_managed_claude_invocation(
+        config=config,
+        request=ManagedClaudeTaskRequest(prompt="hello"),
+        base_env={"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "250000"},
+    )
+    assert invocation.env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == str(window or 250000)

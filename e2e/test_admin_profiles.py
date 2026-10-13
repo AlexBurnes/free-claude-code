@@ -124,14 +124,26 @@ def test_profile_fallbacks_and_reasoning_round_trip(
     add_input = editor.locator("#profile-model_fallbacks-add")
     for model in ("groq/first", "groq/second"):
         add_input.fill(model)
-        editor.get_by_role("button", name="Add", exact=True).click()
-    editor.get_by_role("button", name="Move groq/second up", exact=True).click()
+        editor.get_by_label("Fallback reasoning effort", exact=True).select_option(
+            "high"
+        )
+        editor.get_by_role("button", name="Add fallback", exact=True).click()
+    handle = editor.get_by_role("button", name="Move groq/second", exact=True)
+    handle.focus()
+    handle.press("ArrowUp")
     page.locator("#profile-reasoning_policy").select_option("off")
     page.locator("#saveProfile").click()
     expect(page.locator("#profileMessage")).to_contain_text("saved")
     saved = page.request.get(f"{admin_base_url}/admin/api/profiles/routing").json()
-    assert saved["configuration"]["model_fallbacks"] == ["groq/second", "groq/first"]
+    assert saved["configuration"]["model_fallbacks"] == [
+        {"model": "groq/second", "reasoning": "high", "api_key_number": 1},
+        {"model": "groq/first", "reasoning": "high", "api_key_number": 1},
+    ]
     assert saved["configuration"]["reasoning_policy"] == "off"
+    page.locator("#reloadProfiles").click()
+    expect(
+        editor.get_by_label("Reasoning effort for groq/second", exact=True)
+    ).to_have_value("high")
     for model in ("groq/first", "groq/second"):
         editor.get_by_role("button", name=f"Remove {model}", exact=True).click()
     page.locator("#saveProfile").click()

@@ -1,6 +1,7 @@
 """Provider corrections target explicit history failures, never arbitrary 400s."""
 
 from copy import deepcopy
+from typing import Any
 
 import httpx2
 import pytest
@@ -97,6 +98,98 @@ def test_unidentified_cipher_failure_with_multiple_records_is_not_guessed():
         )
         is None
     )
+
+
+@pytest.mark.parametrize("rejected_id", ["rs_fixture", "rs_fixture_extra"])
+def test_unquoted_cipher_item_id_rejection_repairs_only_exact_record(rejected_id):
+    body = {
+        "input": [
+            {
+                "type": "reasoning",
+                "id": item_id,
+                "encrypted_content": f"opaque-{item_id}",
+                "content": [{"type": "reasoning_text", "text": f"Readable {item_id}"}],
+                "summary": [],
+            }
+            for item_id in ["rs_fixture", "rs_fixture_extra"]
+        ]
+        + [{"role": "user", "content": "Keep user history."}],
+    }
+    original = deepcopy(body)
+    fixed = history_retry_body(
+        _error(
+            f"The encrypted content for item {rejected_id} could not be verified. "
+            "Reason: Encrypted content item_id did not match the target item id.",
+            code="invalid_encrypted_content",
+        ),
+        body,
+        "responses",
+    )
+    assert fixed is not None
+    rejected_index = 0 if rejected_id == "rs_fixture" else 1
+    assert fixed["input"][rejected_index] == {
+        "role": "assistant",
+        "content": f"Readable {rejected_id}",
+    }
+    assert fixed["input"][1 - rejected_index] == original["input"][1 - rejected_index]
+    assert fixed["input"][-1] == original["input"][-1]
+    assert body == original
+
+
+def test_unknown_unquoted_cipher_item_id_does_not_repair_single_other_record():
+    body = {
+        "input": [
+            {"type": "reasoning", "id": "rs_known", "encrypted_content": "opaque"}
+        ]
+    }
+    original = deepcopy(body)
+    assert (
+        history_retry_body(
+            _error(
+                "The encrypted content for item rs_unknown could not be verified. "
+                "Reason: Encrypted content item_id did not match the target item id.",
+                code="invalid_encrypted_content",
+            ),
+            body,
+            "responses",
+        )
+        is None
+    )
+    assert body == original
+
+
+@pytest.mark.parametrize("mismatch", ["id", "encrypted_content", "ambiguous"])
+def test_readable_recovery_source_requires_unique_wire_id_and_cipher(mismatch):
+    wire: dict[str, Any] = {
+        "input": [
+            {"type": "reasoning", "id": "rs_fixture", "encrypted_content": "opaque"}
+        ]
+    }
+    readable = deepcopy(wire)
+    readable["input"][0]["content"] = [
+        {"type": "reasoning_text", "text": "Readable source must not be guessed."}
+    ]
+    if mismatch == "ambiguous":
+        readable["input"].append(deepcopy(readable["input"][0]))
+    else:
+        readable["input"][0][mismatch] = "other-identity"
+    original_wire = deepcopy(wire)
+    original_readable = deepcopy(readable)
+    assert (
+        history_retry_body(
+            _error(
+                "The encrypted content for item rs_fixture could not be verified. "
+                "Reason: Encrypted content item_id did not match the target item id.",
+                code="invalid_encrypted_content",
+            ),
+            wire,
+            "responses",
+            readable_body=readable,
+        )
+        is None
+    )
+    assert wire == original_wire
+    assert readable == original_readable
 
 
 def test_missing_reference_targets_its_item_only():

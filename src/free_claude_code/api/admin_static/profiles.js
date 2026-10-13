@@ -60,7 +60,7 @@ window.FccProfiles = (() => {
         const template = state.fields.get(key.toUpperCase());
         if (!template) return;
         let value = configuration[key];
-        if (key === "model_fallbacks") value = value?.length ? value.join(",") : null;
+        if (key === "model_fallbacks") value = value?.length ? JSON.stringify(value) : null;
         // These are saved routing choices, independent of process environment locks.
         const field = { ...template, key, value: value ?? null, locked: false, source: "", advanced: false, secret: false, nullable: key === "model_fallbacks" || key.startsWith("model_") ? true : template.nullable };
         if (template.type === "optional_model") field.description = "Select None to use this profile’s base model for this tier.";
@@ -97,7 +97,7 @@ window.FccProfiles = (() => {
       const input = byId(`profile-${key}`);
       if (!input) return;
       const value = readFieldValue(input);
-      configuration[key] = key === "model_fallbacks" ? (value ? value.split(",").map((item) => item.trim()).filter(Boolean) : null) : typeof value === "string" ? value.trim() : value;
+      configuration[key] = key === "model_fallbacks" ? (value ? JSON.parse(value) : null) : typeof value === "string" ? value.trim() : value;
     });
     if (!configuration.model) throw new Error("Choose a base model before saving this profile.");
     return configuration;

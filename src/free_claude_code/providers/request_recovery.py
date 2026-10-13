@@ -118,10 +118,13 @@ class RequestCorrections:
         *,
         sent_body: Mapping[str, Any],
         reasoning_error: Exception,
+        readable_body: Mapping[str, Any] | None = None,
         reasoning_sent_body: Mapping[str, Any] | None = None,
         after_common: Callable[[set[str]], JsonObject | None] | None = None,
     ) -> JsonObject | None:
-        corrected = history_retry_body(history_error, sent_body, self._protocol)
+        corrected = history_retry_body(
+            history_error, sent_body, self._protocol, readable_body=readable_body
+        )
         if corrected is not None:
             return corrected
         if self._reasoning is not None and "reasoning" not in self._used_retry_kinds:

@@ -8,7 +8,10 @@ from typing import cast
 
 from free_claude_code.config.server_urls import same_proxy_url
 from free_claude_code.core.json_types import JsonObject
-from free_claude_code.harnesses.claude import claude_proxy_values
+from free_claude_code.harnesses.claude import (
+    CLAUDE_AUTO_COMPACT_WINDOW_ENV,
+    claude_proxy_values,
+)
 from free_claude_code.harnesses.config_file import atomic_write_text, decode_json
 
 _ENV = "claudeCode.environmentVariables"
@@ -82,6 +85,12 @@ def _connect(
 ) -> bool:
     before = json.dumps(document, allow_nan=False)
     document[_LOGIN] = True
+    if CLAUDE_AUTO_COMPACT_WINDOW_ENV not in values:
+        entries = [
+            entry
+            for entry in entries
+            if entry["name"] != CLAUDE_AUTO_COMPACT_WINDOW_ENV
+        ]
     remaining = dict(values)
     for entry in entries:
         name = cast(str, entry["name"])
@@ -95,11 +104,19 @@ def _connect(
     return settings_changed
 
 
-def refresh_connected(path: Path, proxy_root_url: str, auth_token: str) -> bool:
+def refresh_connected(
+    path: Path,
+    proxy_root_url: str,
+    auth_token: str,
+    *,
+    auto_compact_window: int | None = None,
+) -> bool:
     """Apply current settings only to an existing connection, even from release one."""
     path = path.resolve()
-    values = claude_proxy_values(proxy_root_url, auth_token)
-    document, entries = _read(path, set(values))
+    values = claude_proxy_values(
+        proxy_root_url, auth_token, auto_compact_window=auto_compact_window
+    )
+    document, entries = _read(path, set(values) | {CLAUDE_AUTO_COMPACT_WINDOW_ENV})
     if not _connected(document, entries, values):
         return False
     return _connect(path, document, entries, values)
@@ -110,17 +127,22 @@ def configure(
     proxy_root_url: str,
     auth_token: str,
     connected: bool | None = None,
+    *,
+    auto_compact_window: int | None = None,
 ) -> JsonObject:
     """Inspect, connect, or disconnect; preserve unrelated values, not formatting."""
     path = path.resolve()
-    values = claude_proxy_values(proxy_root_url, auth_token)
-    document, entries = _read(path, set(values))
+    values = claude_proxy_values(
+        proxy_root_url, auth_token, auto_compact_window=auto_compact_window
+    )
+    managed_keys = set(values) | {CLAUDE_AUTO_COMPACT_WINDOW_ENV}
+    document, entries = _read(path, managed_keys)
     if connected is True:
         _connect(path, document, entries, values)
     elif connected is False:
         before = json.dumps(document, allow_nan=False)
         document.pop(_LOGIN, None)
-        retained = [entry for entry in entries if entry["name"] not in values]
+        retained = [entry for entry in entries if entry["name"] not in managed_keys]
         if len(retained) != len(entries):
             if retained:
                 document[_ENV] = retained
@@ -131,7 +153,7 @@ def configure(
                 path, json.dumps(document, indent=2, allow_nan=False) + "\n"
             )
     if connected is not None:
-        document, entries = _read(path, set(values))
+        document, entries = _read(path, managed_keys)
     result: JsonObject = {"connected": _connected(document, entries, values)}
     if connected is None:
         result["paths"] = {

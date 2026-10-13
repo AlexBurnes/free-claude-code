@@ -1052,6 +1052,12 @@ function inputForField(field) {
 
   const input = document.createElement("input");
   input.type = field.type === "number" ? "number" : "text";
+  if (field.key === "FCC_CLAUDE_AUTO_COMPACT_WINDOW") {
+    input.min = "100000";
+    input.max = "1000000";
+    input.step = "1";
+    input.placeholder = "Automatic (model default)";
+  }
   if (field.type === "secret") {
     input.setAttribute("autocapitalize", "none");
     input.spellcheck = false;
@@ -1103,7 +1109,7 @@ class ModelListEditor {
     const addCombobox = this.modelCombobox("", "add", "New fallback model");
     this.addInput = addCombobox.input;
     this.addEffort = this.effortSelect("inherit", "Fallback reasoning effort");
-    this.addEffort.id = `field-${field.key}-effort`;
+    this.addEffort.id = `${input.id}-effort`;
     this.addKey = this.keySelect("", 1, "Fallback API key");
     this.addProviderId = "";
     const updateAddModel = () => {
@@ -1266,7 +1272,7 @@ class ModelListEditor {
 
   modelCombobox(value, suffix, label) {
     const input = window.FccFormControls.configure(document.createElement("input"));
-    input.id = `field-${this.field.key}-${suffix}`;
+    input.id = `${this.input.id}-${suffix}`;
     input.type = "text";
     input.autocomplete = "off";
     input.placeholder = "provider/model";

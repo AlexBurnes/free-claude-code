@@ -232,7 +232,8 @@ async def test_continuously_changed_generation_has_bounded_retry(runtime, monkey
     entered, release = asyncio.Queue(), threading.Semaphore(0)
     loop = asyncio.get_running_loop()
 
-    def held(path, url, token, connected=None):
+    def held(path, url, token, connected=None, *, auto_compact_window=None):
+        assert auto_compact_window == runtime.settings.claude_auto_compact_window
         loop.call_soon_threadsafe(entered.put_nowait, token)
         assert release.acquire(timeout=5)
         return {"connected": False, "paths": {}}
@@ -307,7 +308,7 @@ async def test_startup_finishing_during_skipped_status_repeats_inspection(
 
     monkeypatch.setattr(claude, "settings_path", resolve_path)
     monkeypatch.setattr(
-        claude, "configure", lambda *args: {"connected": True, "paths": {}}
+        claude, "configure", lambda *args, **kwargs: {"connected": True, "paths": {}}
     )
     try:
         result = await runtime.claude_vscode_status()
@@ -353,10 +354,12 @@ async def test_generation_change_discards_old_status_outcome(
     entered, release = asyncio.Event(), threading.Event()
     loop = asyncio.get_running_loop()
     tokens = []
+    windows = []
     initial_token = runtime.settings.proxy_auth_token
 
-    def held(path, url, token, connected=None):
+    def held(path, url, token, connected=None, *, auto_compact_window=None):
         tokens.append(token)
+        windows.append(auto_compact_window)
         if len(tokens) == 1:
             loop.call_soon_threadsafe(entered.set)
             assert release.wait(5)
@@ -369,12 +372,18 @@ async def test_generation_change_discards_old_status_outcome(
     try:
         await asyncio.wait_for(entered.wait(), 5)
         await runtime.provider_manager.replace(
-            runtime.settings.model_copy(update={"proxy_auth_token": "rotated"}),
+            runtime.settings.model_copy(
+                update={
+                    "proxy_auth_token": "rotated",
+                    "claude_auto_compact_window": 300000,
+                }
+            ),
             commit=AsyncMock(),
         )
         release.set()
         assert (await asyncio.wait_for(task, 5))["connected"] is True
         assert tokens == [initial_token, "rotated"]
+        assert windows == [None, 300000]
     finally:
         release.set()
         await asyncio.gather(task, return_exceptions=True)

@@ -142,7 +142,7 @@ def test_remote_client_is_rejected(integration):
 def test_io_failure_returns_safe_error(integration, monkeypatch):
     client, _, _ = integration
 
-    def fail(*args):
+    def fail(*args, auto_compact_window=None):
         raise PermissionError("integration-secret")
 
     monkeypatch.setattr(claude_integration, "configure", fail)

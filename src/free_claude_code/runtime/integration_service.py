@@ -559,11 +559,18 @@ class IntegrationService:
             if action == "refresh":
                 return {
                     "changed": jetbrains_acp_integration.refresh_connected(
-                        path, url, token
+                        path,
+                        url,
+                        token,
+                        auto_compact_window=self.settings.claude_auto_compact_window,
                     )
                 }
             return jetbrains_acp_integration.configure(
-                path, url, token, None if action == "status" else action == "connect"
+                path,
+                url,
+                token,
+                None if action == "status" else action == "connect",
+                auto_compact_window=self.settings.claude_auto_compact_window,
             )
 
         try:
@@ -651,16 +658,27 @@ class IntegrationService:
                 }
             if action == "refresh":
                 return {
-                    "changed": claude_integration.refresh_connected(path, url, token)
+                    "changed": claude_integration.refresh_connected(
+                        path,
+                        url,
+                        token,
+                        auto_compact_window=self.settings.claude_auto_compact_window,
+                    )
                 }
             if action == "connect":
-                claude_integration.configure(path, url, token)
+                claude_integration.configure(
+                    path,
+                    url,
+                    token,
+                    auto_compact_window=self.settings.claude_auto_compact_window,
+                )
                 claude_onboarding.complete(claude_onboarding.state_path())
             result = claude_integration.configure(
                 path,
                 url,
                 token,
                 None if action == "status" else action == "connect",
+                auto_compact_window=self.settings.claude_auto_compact_window,
             )
             if action == "status":
                 result["paths"] = {

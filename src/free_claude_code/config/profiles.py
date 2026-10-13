@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from free_claude_code.core.interprocess_lock import InterprocessFileLock
 
 from . import paths
-from .model_refs import split_provider_model_ref
+from .model_refs import ModelFallbacks, split_provider_model_ref
 from .reasoning import ReasoningPreference
 from .settings import NonEmptyString, Settings
 
@@ -54,7 +54,7 @@ class RoutingProfile(BaseModel):
     model_opus: NonEmptyString | None = None
     model_sonnet: NonEmptyString | None = None
     model_haiku: NonEmptyString | None = None
-    model_fallbacks: tuple[NonEmptyString, ...] | None = None
+    model_fallbacks: ModelFallbacks = None
     reasoning_policy: ReasoningPreference = ReasoningPreference.CLIENT
     reasoning_fable: ReasoningPreference = ReasoningPreference.INHERIT
     reasoning_opus: ReasoningPreference = ReasoningPreference.INHERIT
@@ -68,15 +68,6 @@ class RoutingProfile(BaseModel):
     def validate_model(cls, value: str | None) -> str | None:
         if value is not None:
             split_provider_model_ref(value)
-        return value
-
-    @field_validator("model_fallbacks")
-    @classmethod
-    def validate_fallbacks(
-        cls, value: tuple[str, ...] | None
-    ) -> tuple[str, ...] | None:
-        for ref in value or ():
-            split_provider_model_ref(ref)
         return value
 
     @field_validator("reasoning_policy")
@@ -103,7 +94,7 @@ class RoutingProfile(BaseModel):
                     self.model_opus,
                     self.model_sonnet,
                     self.model_haiku,
-                    *(self.model_fallbacks or ()),
+                    *(entry.model for entry in self.model_fallbacks or ()),
                 )
                 if ref is not None
             )

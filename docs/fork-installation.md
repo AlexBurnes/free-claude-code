@@ -57,3 +57,7 @@ uv tool install --force --refresh --python 3.14.7 \
 Stop a running FCC service before replacing its installation, and start it afterward. Relaunch agents using named-profile session bindings after restarting the server. An installation pinned to a commit remains at that commit until you select a newer SHA.
 
 The upstream quick-start installer and `fcc-update` target the original upstream project. Use this guide's fork-specific commands to retain these changes.
+
+## Compare with upstream
+
+To keep an unmodified upstream installation alongside this fork and switch a single service between them, see [the version comparison guide](version-comparison.md). Use its matching launcher dispatcher when testing API errors.
