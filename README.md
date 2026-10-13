@@ -25,10 +25,10 @@
 
 ## What You Get
 
-- **59 ToS-friendly providers. 1.3B+ free tokens every month.** Use free, paid, subscription, and local models from one searchable UI without putting your account at risk. FCC follows provider terms and removes integrations if they stop being allowed.
+- **61 ToS-friendly providers. 1.3B+ free tokens every month.** Use free, paid, subscription, and local models from one searchable UI without putting your account at risk. FCC follows provider terms and removes integrations if they stop being allowed.
 - **11 coding agents. One model catalog.** Run [Claude Code](https://code.claude.com/docs/en/overview), [Codex](https://github.com/openai/codex), [Pi](https://github.com/earendil-works/pi), [OpenCode](https://github.com/anomalyco/opencode), [Cline](https://github.com/cline/cline), [Hermes](https://github.com/NousResearch/hermes-agent), [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), [Grok Build](https://github.com/xai-org/grok-build), [Muse Code](https://research.meta.ai/blog/introducing-muse-code-and-muse-spark-1-2/), [Aider](https://aider.chat/), or [VS Code Chat](https://code.visualstudio.com/) with your FCC models.
 - **Keep coding through provider outages.** After retries are exhausted, FCC automatically tries your next configured model without making you restart the turn. This works across every client.
-- **Up to 90% fewer terminal-output tokens.** Optional [RTK](https://github.com/rtk-ai/rtk) filters common command output, while five FCC optimizations handle quota probes, command-prefix detection, titles, suggestions, and filepaths without calling a provider.
+- **Up to 90% lower token usage.** Optional [RTK](https://github.com/rtk-ai/rtk) filters common command output, and [Headroom](https://github.com/headroomlabs-ai/headroom) compresses tool results. Five FCC optimizations handle quota probes, command-prefix detection, titles, suggestions, and filepaths without calling a provider.
 - **Native Code sessions in your browser.** Choose a folder and run Codex in the browser with real-time and background support. Freely switch providers/models in the same session. Support for switching harnesses in the same session coming soon!
 - **Terminal, desktop, IDE, or phone.** Work through native launchers, [VS Code](https://code.visualstudio.com/), [Codex App](https://learn.chatgpt.com/docs/app), [JetBrains](https://www.jetbrains.com/), [Discord](https://discord.com/), or [Telegram](https://telegram.org/).
 - **Voice notes in. Code out.** Talk to your agent using local [Whisper](https://github.com/openai/whisper) or [NVIDIA NIM](https://docs.nvidia.com/nim/speech/latest/asr/deploy-asr-models/whisper.html) transcription.
@@ -64,7 +64,7 @@ Windows PowerShell:
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.ps1")))
 ```
 
-When prompted, choose at least one coding agent and optionally RTK. You can review the installers before running them: [install.sh](scripts/install.sh) and [install.ps1](scripts/install.ps1).
+When prompted, choose at least one coding agent and optionally enable [RTK](https://github.com/rtk-ai/rtk) + [Headroom](https://github.com/headroomlabs-ai/headroom) token optimization for supported agents. You can review the installers before running them: [install.sh](scripts/install.sh) and [install.ps1](scripts/install.ps1).
 
 ### 2. Start FCC
 
@@ -94,9 +94,9 @@ terminal open.
 
 1. Create an API key at [build.nvidia.com/settings/api-keys](https://build.nvidia.com/settings/api-keys).
 2. Open the Admin UI URL from the server log.
-3. Paste the key into `NVIDIA_NIM_API_KEY`.
+3. Open NVIDIA NIM in **Providers**, click **Add key**, paste the key, and click **Save**.
 4. Leave `MODEL` on the default `nvidia_nim/nvidia/nemotron-3-super-120b-a12b`, or search the model dropdown and select another model.
-5. Click **Apply**.
+5. Click **Apply** to save your model selection.
 
 To protect the local proxy with a bearer token, enable **Proxy Authentication**
 in Admin.
@@ -131,17 +131,6 @@ OpenCode 2:
 fcc-opencode
 ```
 
-To upgrade from OpenCode 1, close OpenCode and rerun the FCC installer with
-OpenCode selected. For npm or other package-manager installations, follow
-[OpenCode's migration instructions](https://opencode.ai/v2/docs/migrate-v1/)
-first. For npm v1, run `npm uninstall -g opencode-ai`, then rerun the FCC installer.
-
-RTK integration is temporarily unavailable for OpenCode 2. RTK continues to work
-with the other supported agents.
-
-Use `fcc-opencode` for coding and sessions. Use plain `opencode` for commands
-such as upgrades, service management, ACP, and MCP setup.
-
 Cline:
 
 ```bash
@@ -159,16 +148,6 @@ DeepSeek Harness Web:
 ```bash
 fcc-dsh
 ```
-
-For DeepSeek Harness Desktop, install and open the app once, then select **Connect** under **Integrations → DeepSeek Harness Desktop** in FCC. Keep FCC running while using its models. FCC becomes the default for new sessions. Select **Disconnect** to remove the connection. Native DeepSeek account features still need a DeepSeek login.
-
-Use DeepSeek Harness 0.2.0-rc.2 or newer. Update the CLI with:
-
-```bash
-npm install -g @deepseek-ai/dsh@latest
-```
-
-For headless tasks, run `fcc-dsh headless "your task"`. Extra `--patch` files apply after FCC's settings. After disconnecting Desktop, select another model to continue an existing FCC session. If another DSH setting uses FCC's Desktop credential, Disconnect keeps that credential and reports why.
 
 Grok Build:
 
@@ -208,7 +187,15 @@ Optional: add an ordered **Fallback Models** list under **Model Config**. It
 applies to every connected client. A failed request may reach and consume usage
 from more than one provider before succeeding.
 
-For another API endpoint, open **Providers → Custom providers → Add provider**. Enter its API base URL, optional key, and API format. Leave **Model IDs** empty to discover models automatically, or enter one upstream model ID per line. Save, then select a model in **Model Config**.
+Provider modals support numbered API keys. Use **Add key**, remove rows, or drag their handles to reorder them. FCC uses key 1. Saving checks every key, blocks confirmed invalid keys, and shows warnings for keys it cannot verify.
+
+The same API key environment variable also accepts a JSON array:
+
+```dotenv
+NVIDIA_NIM_API_KEY='["your-first-key","your-second-key"]'
+```
+
+For another API endpoint, open **Providers → Custom providers → Add provider**. Enter its API base URL, optional keys, and API format. Leave **Model IDs** empty to discover models automatically, or enter one upstream model ID per line. Save, then select a model in **Model Config**.
 
 <details>
 <summary><strong>Provider catalog</strong></summary>
@@ -269,6 +256,7 @@ For another API endpoint, open **Providers → Custom providers → Add provider
 | [Experiential Labs](https://platform.experientiallabs.ai/) | `EXPLABS_API_KEY` | `experiential/union-alpha` |
 | [Cheaper Inference](https://cheaperinference.com/signup) | `CHEAPER_INFERENCE_API_KEY` | `cheaperinference/gpt-5.4-mini` |
 | [OrcaRouter](https://www.orcarouter.ai/) | `ORCAROUTER_API_KEY` | `orcarouter/deepseek/deepseek-v4-flash-free` |
+| [Atlas Cloud](https://console.atlascloud.ai/api-keys) | `ATLASCLOUD_API_KEY` | `atlascloud/deepseek-ai/deepseek-v4-flash` |
 | [xKiro](https://xkiro.com/) | `XKIRO_API_KEY` | `xkiro/qwen/qwen3.7-flash:free` |
 | [Opper](https://platform.opper.ai/) | `OPPER_API_KEY` | `opper/claude-sonnet-4-6` |
 | [Ollama Cloud](https://ollama.com/settings/keys) | `OLLAMA_API_KEY` | `ollama_cloud/qwen3-coder:480b` |
@@ -358,19 +346,25 @@ Use the tag shown by `ollama list` with the `ollama/` prefix. `OLLAMA_BASE_URL` 
 
 `MODEL` is the fallback for every request. Select a model for `MODEL_FABLE`, `MODEL_OPUS`, `MODEL_SONNET`, or `MODEL_HAIKU` to override an individual Claude Code tier. Select **None** to use `MODEL`.
 
+In **Admin UI → Model Config**, add **Fallback Models** in the order FCC should try them if the selected model fails. Each fallback has its own reasoning effort: **Inherit**, **Off**, **From client**, **Low**, **Medium**, **High**, **X-High**, or **Max**.
+
+Choose a model, effort, and API key number in the bottom row, then click **+**. **Key 1**, **Key 2**, and so on refer to the current numbered keys in that provider's settings. Existing fallbacks use **Key 1**. Edit the selections in place, drag the handle to change the order, or click the red trash button to remove a fallback.
+
+**Inherit** keeps the original request's resolved reasoning setting. **From client** uses the effort or token budget sent by your coding agent, bypassing the global or tier setting. A fallback matching the selected provider, model, and key is skipped. You can select the same model with another key number.
+
 </details>
 
 <details>
 <summary><strong>Reasoning control</strong></summary>
 
-Open **Admin UI → Model Config → Reasoning** and select the behavior you want.
+Open **Admin UI → Model Config → Model Routing** and choose an effort beside each model. **Default Effort** starts at **From client**. Fable, Opus, Sonnet, and Haiku start at **Inherit**.
 
 | Selection | Behavior |
 | --- | --- |
-| **From client** (default) | Use the effort sent by your coding agent. If none is sent, keep the provider default. |
+| **From client** | Use the effort sent by your coding agent. If none is sent, keep the provider default. |
 | **Off** | Request reasoning to be disabled. |
 | **Low**, **Medium**, **High**, **X-High**, or **Max** | Override the client with the selected reasoning level. |
-| **Inherit** (Fable, Opus, Sonnet, and Haiku only) | Use the root Reasoning selection. |
+| **Inherit** | Tier overrides use Default Effort. Fallbacks keep the original request's resolved effort. |
 
 Providers that do not support a selected control retain their own behavior.
 
@@ -387,11 +381,16 @@ For editor and app integrations, install the client, start FCC, then open
 - **VS Code Chat**: Install the latest [VS Code](https://code.visualstudio.com/), connect, and select an FCC model in its built-in Chat model picker.
 - **Claude Desktop**: Install [Claude Desktop](https://claude.ai/download). Fully quit it before connecting or disconnecting, then reopen it. Disconnect returns to normal Claude sign-in.
 - **Codex in VS Code and App**: Install the [Codex extension](https://marketplace.visualstudio.com/items?itemName=openai.chatgpt) or Codex App.
+- **DeepSeek Harness Desktop**: Install and open the app once before connecting. Start a new session to use FCC models.
 - **Claude Code in JetBrains ACP**: Install Claude Agent in JetBrains AI Assistant and start it once, then click **Connect** in FCC. Reopen the IDE, select **Claude Code (FCC)**, and start a new chat. After JetBrains updates the agent, restart FCC before starting a new chat. Requires a local IDE in its standard installation locations.
 
 Reload VS Code or restart the app/IDE after connecting. In Codex and Claude Desktop, select an FCC
 model from the model picker. Reload or restart the client when FCC reports updated settings. Use
 **Disconnect** on the same card to remove the integration.
+
+To complete Claude Code onboarding separately, open **Admin UI → Integrations →
+Claude Code onboarding** and click **Complete onboarding**. Connecting Claude Code
+in VS Code also completes onboarding.
 
 Run FCC on the same computer and in the same user environment as the client you
 are configuring.
@@ -524,7 +523,7 @@ Stop every running FCC command before uninstalling.
 **Keeps**
 
 - uv and Python
-- Your coding agents and RTK
+- Your coding agents, RTK, and Headroom
 
 macOS/Linux:
 

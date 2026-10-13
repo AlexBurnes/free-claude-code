@@ -5,6 +5,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from free_claude_code.application.model_metadata import ProviderModelInfo
+from free_claude_code.config.api_keys import normalize_api_keys
+from free_claude_code.config.custom_providers import CustomProviderDefinition
+from free_claude_code.config.model_refs import ModelFallback
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.model_capabilities import ModelInputModality
 from tests.api.support import create_test_app, provider_manager_for_app
@@ -16,7 +19,7 @@ def _settings(
     model_fable: str | None = None,
     model_opus: str | None = "open_router/anthropic/claude-opus",
     model_haiku: str | None = "deepseek/deepseek-chat",
-    model_fallbacks: tuple[str, ...] | None = None,
+    model_fallbacks: tuple[ModelFallback, ...] | None = None,
 ) -> Settings:
     return Settings.model_construct(
         model=model,
@@ -27,9 +30,9 @@ def _settings(
         model_fallbacks=model_fallbacks,
         proxy_auth_enabled=False,
         proxy_auth_token="freecc",
-        deepseek_api_key="deepseek-key",
-        open_router_api_key="open-router-key",
-        wafer_api_key="wafer-key",
+        deepseek_api_keys=normalize_api_keys("deepseek-key"),
+        open_router_api_keys=normalize_api_keys("open-router-key"),
+        wafer_api_keys=normalize_api_keys("wafer-key"),
     )
 
 
@@ -78,7 +81,10 @@ def test_sorted_catalog_retains_an_explicit_no_thinking_server_default(view):
         model="open_router/Zulu",
         model_opus=None,
         model_haiku=None,
-        model_fallbacks=("wafer/z-fallback", "deepseek/a-fallback"),
+        model_fallbacks=(
+            ModelFallback(model="wafer/z-fallback"),
+            ModelFallback(model="deepseek/a-fallback"),
+        ),
     )
     app = create_test_app(settings)
     provider_manager_for_app(app).cache_model_infos(
@@ -98,7 +104,10 @@ def test_sorted_catalog_retains_an_explicit_no_thinking_server_default(view):
     assert payload["default_model_id"] == "claude-3-freecc-no-thinking/open_router/Zulu"
     assert payload["first_id"] == "deepseek/a-fallback"
     assert payload["last_id"] == "wafer/z-fallback"
-    assert settings.model_fallbacks == ("wafer/z-fallback", "deepseek/a-fallback")
+    assert settings.model_fallbacks == (
+        ModelFallback(model="wafer/z-fallback"),
+        ModelFallback(model="deepseek/a-fallback"),
+    )
 
 
 def test_models_list_includes_configured_refs_cached_provider_models_and_aliases():
@@ -144,6 +153,42 @@ def test_models_list_includes_configured_refs_cached_provider_models_and_aliases
     assert all(
         "provider_model_ref" not in item and "apiBackend" not in item
         for item in data["data"]
+    )
+
+
+def test_claude_models_use_custom_provider_display_name_without_changing_ids():
+    provider_id = "custom_f526dba2aa0a472f9c506ba236056d57"
+    model_ref = f"{provider_id}/deepseek-v4.1-flash"
+    definition = CustomProviderDefinition(
+        provider_id=provider_id,
+        display_name="Phoenix",
+        base_url="https://gateway.example/v1",
+    )
+    settings = _settings(model=model_ref, model_opus=None, model_haiku=None).model_copy(
+        update={"custom_providers": (definition,)}
+    )
+    app = create_test_app(settings)
+    provider_manager_for_app(app).cache_model_infos(
+        provider_id,
+        {
+            ProviderModelInfo("deepseek-v4.1-flash", supports_thinking=True),
+            ProviderModelInfo("deepseek-plain", supports_thinking=False),
+        },
+    )
+
+    response = TestClient(app).get("/v1/models")
+
+    assert response.status_code == 200
+    rows = {row["id"]: row for row in response.json()["data"]}
+    assert rows[f"anthropic/{model_ref}"]["display_name"] == (
+        "Phoenix/deepseek-v4.1-flash"
+    )
+    assert rows[f"claude-3-freecc-no-thinking/{model_ref}"]["display_name"] == (
+        "Phoenix/deepseek-v4.1-flash (no thinking)"
+    )
+    plain_ref = f"{provider_id}/deepseek-plain"
+    assert rows[f"claude-3-freecc-no-thinking/{plain_ref}"]["display_name"] == (
+        "Phoenix/deepseek-plain (no thinking)"
     )
 
 
@@ -213,7 +258,7 @@ def test_models_list_includes_fallback_refs_without_cached_discovery():
         _settings(
             model_opus=None,
             model_haiku=None,
-            model_fallbacks=("wafer/DeepSeek-V4-Pro",),
+            model_fallbacks=(ModelFallback(model="wafer/DeepSeek-V4-Pro"),),
         )
     )
 

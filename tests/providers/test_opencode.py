@@ -16,6 +16,7 @@ from free_claude_code.application.errors import InvalidRequestError
 from free_claude_code.application.execution import ProviderExecutor
 from free_claude_code.application.model_metadata import ProviderModelInfo
 from free_claude_code.application.routing import (
+    ProviderModelCandidate,
     ProviderModelTarget,
     ResolvedModelRoute,
     RoutedMessagesRequest,
@@ -1114,11 +1115,11 @@ async def test_candidate_fallback_resolves_each_opencode_transport(
     resolved = ResolvedModelRoute(
         original_model="public-model",
         primary=target(primary_model),
-        fallbacks=(target(fallback_model),),
+        fallbacks=(ProviderModelCandidate(target(fallback_model)),),
         reasoning_preference=ReasoningPreference.INHERIT,
     )
     executor = ProviderExecutor(
-        AsyncMock(side_effect=lambda _provider_id: provider),
+        AsyncMock(side_effect=lambda _provider_id, _api_key_number: provider),
         progress_timeout_seconds=60.0,
     )
 

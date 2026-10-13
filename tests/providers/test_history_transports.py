@@ -356,7 +356,7 @@ async def test_legacy_responses_id_then_cipher_rejection_recovers_without_changi
         assert bodies[1]["input"][0]["encrypted_content"] == "opaque-original"
         assert bodies[2]["input"][0] == {
             "role": "assistant",
-            "content": "[Earlier reasoning summary]\nFind 17.",
+            "content": "Find 17.",
         }
         assert all(body["reasoning"] == bodies[0]["reasoning"] for body in bodies)
         assert history == original
@@ -500,7 +500,11 @@ async def test_successful_fallback_preserves_raw_state_and_gets_unmodified_input
     routed = _routed_request(_target("open_router", "fallback-model"))
     original = routed.request.model_dump()
     executor = ProviderExecutor(
-        AsyncMock(side_effect=lambda name: primary if name == "provider" else provider),
+        AsyncMock(
+            side_effect=lambda name, _api_key_number: (
+                primary if name == "provider" else provider
+            )
+        ),
         progress_timeout_seconds=10,
     )
     try:

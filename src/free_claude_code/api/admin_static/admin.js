@@ -12,6 +12,7 @@ const state = {
   providerChecks: new Map(),
   providerId: null,
   customProvider: null,
+  configRefreshRequired: false,
   modelLabels: new Map(),
   localStatusRequest: null,
   startup: null,
@@ -37,7 +38,7 @@ const VIEW_GROUPS = [
     id: "model_config",
     label: "Model Config",
     title: "Model Config",
-    sections: ["models", "reasoning", "web_tools"],
+    sections: ["models", "web_tools"],
     containerId: "modelConfigSections",
   },
   {
@@ -224,6 +225,7 @@ async function load({ providersOnly = false } = {}) {
   config.custom_providers ||= [];
   config.provider_status.push(...config.custom_providers.map((provider) => ({ ...provider, kind: "custom", status: "configured", settings_keys: [], missing_configuration_keys: [] })));
   state.config = config;
+  state.configRefreshRequired = false;
   window.CodeSessions.setProviderNames(config.custom_providers);
   state.startup = null;
   state.fields = new Map(config.fields.map((field) => [field.key, field]));
@@ -231,6 +233,7 @@ async function load({ providersOnly = false } = {}) {
   state.providerChecks.clear();
   renderProviders(config.provider_status);
   if (!providersOnly) renderSections(config.sections, config.fields);
+  document.querySelectorAll(".model-list-editor").forEach((element) => element.modelListEditor.refreshKeyOptions());
   byId("configPath").textContent = config.paths.managed;
   void refreshLocalStatus(config);
   void refreshStartup();
@@ -302,6 +305,7 @@ function setActiveView(viewId, { scroll = false } = {}) {
   else window.CodeSessions.deactivate();
   if (activeView.id === "integrations") {
     refreshClaudeIntegration();
+    refreshClaudeOnboarding();
     refreshVSCodeChatIntegration();
     refreshJetBrainsIntegration();
     refreshCodexIntegration();
@@ -437,7 +441,14 @@ function updateProviderCard(provider) {
   renderProviderCheckResult(provider.provider_id);
 }
 
-function openProviderDialog(providerId) {
+async function refreshProviderConfig() {
+  if (!state.configRefreshRequired) return true;
+  try { await load({ providersOnly: true }); return true; }
+  catch (error) { showMessage(`Could not reload settings: ${error.message}`, "error"); return false; }
+}
+
+async function openProviderDialog(providerId) {
+  if (!await refreshProviderConfig()) return;
   if (connectedAccountDescriptor(providerId)?.kind === "custom") return openCustomProviderDialog(providerId);
   state.customProvider = null;
   state.providerId = providerId;
@@ -462,9 +473,12 @@ function openProviderDialog(providerId) {
   });
   renderProviderDialogActions(provider);
   updateDirtyState();
-  byId("providerDialog").showModal();
+  if (!byId("providerDialog").open) byId("providerDialog").showModal();
   const missing = provider.missing_configuration_keys?.[0];
-  const first = missing ? byId(`field-${missing}`) : fields.querySelector("input:not(:disabled), select:not(:disabled), textarea:not(:disabled)");
+  const target = missing ? byId(`field-${missing}`) : null;
+  const first = target?.dataset.fieldType === "api_key_list"
+    ? target.closest(".api-key-editor").querySelector("input:not([type=hidden]):not(:disabled), button:not(:disabled)")
+    : target || fields.querySelector("input:not([type=hidden]):not(:disabled), select:not(:disabled), textarea:not(:disabled), button:not(:disabled)");
   first?.focus();
 }
 
@@ -474,9 +488,10 @@ const CUSTOM_LABELS = {
   native_responses: "Native reasoning", messages_manual: "Token-budget thinking", messages_adaptive: "Adaptive thinking",
 };
 
-function openCustomProviderDialog(providerId = null) {
+async function openCustomProviderDialog(providerId = null) {
+  if (!await refreshProviderConfig()) return;
   const provider = state.config.custom_providers.find((item) => item.provider_id === providerId) || {
-    display_name: "", base_url: "", api_key: null, api_format: "openai_chat", reasoning_format: "provider_default", reasoning_history_format: "disabled", model_ids: [],
+    display_name: "", base_url: "", api_keys: { revision: null, entries: [] }, api_format: "openai_chat", reasoning_format: "provider_default", reasoning_history_format: "disabled", model_ids: [],
   };
   state.providerId = providerId || "__custom_new__";
   state.customProvider = provider;
@@ -489,7 +504,7 @@ function openCustomProviderDialog(providerId = null) {
   const definitions = [
     ["display_name", "Name", "string", [], ""],
     ["base_url", "Base URL", "string", [], "Include the API path, for example https://gateway.example/v1."],
-    ["api_key", "API key", "secret", [], "Optional for endpoints that do not require a key."],
+    ["api_keys", "API keys", "api_key_list", [], "Key 1 is used. Leave the list empty for endpoints that do not require a key."],
     ["api_format", "API format", "select", [["openai_chat", "Chat Completions"], ["openai_responses", "Responses"], ["anthropic_messages", "Anthropic Messages"]], "Select the API exposed by your endpoint."],
     ["reasoning_format", "Reasoning format", "select", formats.map((value) => [value, CUSTOM_LABELS[value]]), "How FCC sends reasoning controls. Provider default leaves computation to the upstream."],
     ["reasoning_history_format", "Reasoning history format", "select", [["disabled", "Text context"], ["reasoning_content", "reasoning_content"], ["reasoning", "reasoning"], ["think_tags", "Think tags"]], "How previous reasoning is sent to a Chat Completions endpoint."],
@@ -497,8 +512,8 @@ function openCustomProviderDialog(providerId = null) {
   ];
   for (const [key, label, type, options, description] of definitions) {
     fields.appendChild(renderField({ key, label, type, options: options.map(([value, label]) => ({value, label})), description,
-      value: key === "model_ids" ? provider.model_ids.join("\n") : provider[key], nullable: key === "api_key", secret: key === "api_key",
-      configured: key === "api_key" && !!provider.api_key, locked: !!state.config.custom_providers_locked, source: "managed_env" }));
+      value: key === "model_ids" ? provider.model_ids.join("\n") : provider[key], nullable: key === "api_keys", secret: key === "api_keys",
+      configured: key === "api_keys" && !!provider.api_keys?.entries.length, locked: !!state.config.custom_providers_locked, source: state.config.custom_providers_locked ? "process" : "managed_env" }));
   }
   const format = byId("field-api_format");
   const reasoning = byId("field-reasoning_format");
@@ -526,7 +541,7 @@ function openCustomProviderDialog(providerId = null) {
   }
   byId("saveProvider").hidden = false;
   updateDirtyState();
-  byId("providerDialog").showModal();
+  if (!byId("providerDialog").open) byId("providerDialog").showModal();
   byId("field-display_name").focus();
 }
 
@@ -857,9 +872,11 @@ function renderSections(sections, fields) {
 
       const grid = document.createElement("div");
       grid.className = "field-grid";
-      sectionFields.forEach((field) => {
-        grid.appendChild(renderField(field));
-      });
+      if (section.id === "models") {
+        renderModelRoutes(grid, sectionFields);
+      } else {
+        sectionFields.forEach((field) => grid.appendChild(renderField(field)));
+      }
       sectionEl.appendChild(grid);
 
       if (sectionFields.some((field) => field.advanced)) {
@@ -877,6 +894,28 @@ function renderSections(sections, fields) {
       container.appendChild(sectionEl);
     });
   });
+}
+
+function renderModelRoutes(grid, fields) {
+  const fieldsByKey = new Map(fields.map((field) => [field.key, field]));
+  const routes = [
+    ["Default", "MODEL", "REASONING_POLICY"],
+    ["Fable", "MODEL_FABLE", "REASONING_FABLE"],
+    ["Opus", "MODEL_OPUS", "REASONING_OPUS"],
+    ["Sonnet", "MODEL_SONNET", "REASONING_SONNET"],
+    ["Haiku", "MODEL_HAIKU", "REASONING_HAIKU"],
+  ];
+  for (const [name, modelKey, effortKey] of routes) {
+    const row = document.createElement("div");
+    row.className = "model-route-row";
+    row.setAttribute("role", "group");
+    row.setAttribute("aria-label", `${name} model and effort`);
+    row.append(renderField(fieldsByKey.get(modelKey)), renderField(fieldsByKey.get(effortKey)));
+    grid.appendChild(row);
+    fieldsByKey.delete(modelKey);
+    fieldsByKey.delete(effortKey);
+  }
+  fieldsByKey.forEach((field) => grid.appendChild(renderField(field)));
 }
 
 function renderField(field, { idPrefix = "field" } = {}) {
@@ -898,6 +937,20 @@ function renderField(field, { idPrefix = "field" } = {}) {
     label.appendChild(sourceEl);
   }
 
+  if (field.type === "api_key_list") {
+    label.id = `field-${field.key}-label`;
+    label.removeAttribute("for");
+    const editor = new window.FccApiKeyEditor(field, updateDirtyState);
+    wrapper.append(label, editor.element);
+    if (field.description) {
+      const description = document.createElement("div");
+      description.className = "field-description";
+      description.textContent = field.description;
+      wrapper.appendChild(description);
+    }
+    return wrapper;
+  }
+
   const input = window.FccFormControls.configure(inputForField(field));
   input.id = `${idPrefix}-${field.key}`;
   input.dataset.key = field.key;
@@ -913,6 +966,7 @@ function renderField(field, { idPrefix = "field" } = {}) {
   input.addEventListener("input", () => {
     input.dataset.remove = "false";
     clearCredentialError(input);
+    if (state.providerId) credentialEditors().forEach((editor) => editor.clearResults());
   });
   if (field.type === "optional_model") {
     input.addEventListener("blur", () => {
@@ -1034,40 +1088,65 @@ class ModelListEditor {
   constructor(input, field) {
     this.input = input;
     this.field = field;
-    this.values = input.value
-      ? input.value.split(",").map((value) => value.trim()).filter(Boolean)
-      : [];
+    this.values = input.value ? JSON.parse(input.value) : [];
     this.inputId = `${input.id}-add`;
+    this.rowComboboxes = [];
+    this.rowKeys = [];
+    this.draggedEntry = null;
 
     this.element = document.createElement("div");
     this.element.className = "model-list-editor";
+    this.element.modelListEditor = this;
 
     const addRow = document.createElement("div");
     addRow.className = "model-list-add";
-    this.addInput = window.FccFormControls.configure(document.createElement("input"));
-    this.addInput.id = this.inputId;
-    this.addInput.type = "text";
-    this.addInput.autocomplete = "off";
-    this.addInput.placeholder = "provider/model";
-    this.addInput.disabled = field.locked;
-    const addCombobox = createModelCombobox(this.addInput, {
-      ...field,
-      key: `${field.key}-add`,
-      label: "fallback model",
-      type: "model",
-    });
+    const addCombobox = this.modelCombobox("", "add", "New fallback model");
+    this.addInput = addCombobox.input;
+    this.addEffort = this.effortSelect("inherit", "Fallback reasoning effort");
+    this.addEffort.id = `field-${field.key}-effort`;
+    this.addKey = this.keySelect("", 1, "Fallback API key");
+    this.addProviderId = "";
+    const updateAddModel = () => {
+      const providerId = this.providerId(this.addInput.value);
+      this.updateKeySelect(this.addKey, this.addInput.value, providerId === this.addProviderId ? Number(this.addKey.value) : 1);
+      this.addProviderId = providerId;
+    };
+    this.addInput.addEventListener("input", updateAddModel);
+    this.addInput.addEventListener("change", updateAddModel);
 
-    this.addButton = document.createElement("button");
-    this.addButton.type = "button";
-    this.addButton.className = "secondary-button";
-    this.addButton.textContent = "Add";
-    this.addButton.disabled = field.locked;
-    this.addButton.addEventListener("click", () => this.add());
-    addRow.append(addCombobox.element, this.addButton);
+    this.addButton = this.actionButton("", "Add fallback", () => this.add());
+    this.addButton.className = "secondary-button model-list-action";
+    this.addButton.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 6v12M6 12h12" stroke-linecap="round"/></svg>';
+    addRow.append(addCombobox.element, this.addEffort, this.addKey, this.addButton);
 
     this.rows = document.createElement("div");
     this.rows.className = "model-list-rows";
-    this.element.append(input, addRow, this.rows);
+    this.rows.addEventListener("dragover", (event) => {
+      if (!this.draggedEntry || this.field.locked) return;
+      event.preventDefault();
+      this.clearDropIndicators();
+      const insertion = this.dropInsertion(event);
+      if (this.dropDestination(insertion) === this.values.indexOf(this.draggedEntry)) {
+        event.dataTransfer.dropEffect = "none";
+        return;
+      }
+      event.dataTransfer.dropEffect = "move";
+      const next = this.rows.children[insertion];
+      const marker = next || this.rows.lastElementChild;
+      marker.dataset.dropPosition = next ? "before" : "after";
+    });
+    this.rows.addEventListener("dragleave", (event) => {
+      if (!this.rows.contains(event.relatedTarget)) this.clearDropIndicators();
+    });
+    this.rows.addEventListener("drop", (event) => {
+      if (!this.draggedEntry || this.field.locked) return;
+      event.preventDefault();
+      const moved = this.draggedEntry;
+      const destination = this.dropDestination(this.dropInsertion(event));
+      this.clearDrag();
+      this.move(moved, destination);
+    });
+    this.element.append(input, this.rows, addRow);
     this.renderRows();
   }
 
@@ -1077,14 +1156,19 @@ class ModelListEditor {
       this.message("Enter a full provider/model fallback.", "error");
       return;
     }
-    if (this.values.includes(value)) {
-      this.message("That fallback model is already in the list.", "error");
+    const apiKeyNumber = Number(this.addKey.value);
+    if (this.values.some((entry) => entry.model === value && (entry.api_key_number ?? 1) === apiKeyNumber)) {
+      this.message("That model and API key are already in the fallback list.", "error");
       return;
     }
-    this.values.push(value);
+    this.values.push({ model: value, reasoning: this.addEffort.value, api_key_number: apiKeyNumber });
     this.addInput.value = "";
+    this.addEffort.value = "inherit";
+    this.addProviderId = "";
+    this.updateKeySelect(this.addKey, "", 1);
     this.message("");
     this.sync();
+    this.renderRows();
   }
 
   message(message, kind = "") {
@@ -1092,71 +1176,189 @@ class ModelListEditor {
     else showMessage(message, kind);
   }
 
-  move(index, offset) {
-    const destination = index + offset;
-    if (destination < 0 || destination >= this.values.length) return;
-    [this.values[index], this.values[destination]] = [
-      this.values[destination],
-      this.values[index],
-    ];
+  move(entry, destination) {
+    const index = this.values.indexOf(entry);
+    if (this.field.locked || destination < 0 || destination >= this.values.length || index === destination) return;
+    this.values.splice(index, 1);
+    this.values.splice(destination, 0, entry);
     this.sync();
+    this.renderRows();
   }
 
   remove(index) {
     this.values.splice(index, 1);
     this.sync();
-  }
-
-  sync() {
-    this.input.value = this.values.join(",");
-    this.input.dataset.remove = "false";
-    this.input.dispatchEvent(new Event("input", { bubbles: true }));
     this.renderRows();
   }
 
-  renderRows() {
-    this.rows.innerHTML = "";
-    if (this.values.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "model-list-empty";
-      empty.textContent = "No fallback models configured.";
-      this.rows.appendChild(empty);
-      return;
-    }
+  sync() {
+    this.input.value = this.values.length ? JSON.stringify(this.values) : "";
+    this.input.dataset.remove = "false";
+    this.input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
 
-    this.values.forEach((value, index) => {
+  renderRows() {
+    this.rowComboboxes.forEach((combobox) => {
+      combobox.close();
+      state.modelComboboxes.delete(combobox);
+    });
+    this.rowComboboxes = [];
+    this.rowKeys = [];
+    this.rows.replaceChildren();
+
+    this.values.forEach((entry, index) => {
       const row = document.createElement("div");
       row.className = "model-list-row";
 
-      const model = document.createElement("span");
-      model.className = "model-list-value";
-      model.textContent = value;
+      const combobox = this.modelCombobox(entry.model, `row-${index}`, `Fallback model ${index + 1}`);
+      this.rowComboboxes.push(combobox);
+      const effort = this.effortSelect(entry.reasoning, `Reasoning effort for ${entry.model}`);
+      effort.addEventListener("change", () => {
+        entry.reasoning = effort.value;
+        this.sync();
+      });
+      const key = this.keySelect(entry.model, entry.api_key_number ?? 1, `API key for ${entry.model}`);
+      this.rowKeys.push({ entry, select: key });
+      key.addEventListener("change", () => {
+        entry.api_key_number = Number(key.value);
+        this.sync();
+      });
 
-      const up = this.actionButton("Move up", `Move ${value} up`, () =>
-        this.move(index, -1),
-      );
-      up.disabled = this.field.locked || index === 0;
-      const down = this.actionButton("Move down", `Move ${value} down`, () =>
-        this.move(index, 1),
-      );
-      down.disabled = this.field.locked || index === this.values.length - 1;
-      const remove = this.actionButton("Remove", `Remove ${value}`, () =>
-        this.remove(index),
-      );
-      remove.disabled = this.field.locked;
+      const handle = this.actionButton("⠿", `Move ${entry.model}`);
+      handle.classList.add("model-list-drag");
+      handle.draggable = !this.field.locked;
+      handle.title = "Drag to reorder, or use the up and down arrow keys.";
+      handle.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        event.preventDefault();
+        this.move(entry, this.values.indexOf(entry) + (event.key === "ArrowUp" ? -1 : 1));
+        this.rows.children[this.values.indexOf(entry)].querySelector(".model-list-drag").focus();
+      });
+      handle.addEventListener("dragstart", (event) => {
+        this.draggedEntry = entry;
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", entry.model);
+        row.classList.add("dragging");
+      });
+      handle.addEventListener("dragend", () => this.clearDrag());
 
-      row.append(model, up, down, remove);
+      const remove = this.actionButton("", `Remove ${entry.model}`, () => this.remove(index));
+      remove.className = "danger-button model-list-action";
+      remove.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      const updateModel = () => {
+        const previousProvider = this.providerId(entry.model);
+        entry.model = combobox.input.value.trim();
+        if (this.providerId(entry.model) !== previousProvider) entry.api_key_number = 1;
+        this.updateKeySelect(key, entry.model, entry.api_key_number ?? 1);
+        key.setAttribute("aria-label", `API key for ${entry.model}`);
+        effort.setAttribute("aria-label", `Reasoning effort for ${entry.model}`);
+        handle.setAttribute("aria-label", `Move ${entry.model}`);
+        remove.setAttribute("aria-label", `Remove ${entry.model}`);
+        this.sync();
+      };
+      combobox.input.addEventListener("input", updateModel);
+      combobox.input.addEventListener("change", updateModel);
+
+      row.append(handle, combobox.element, effort, key, remove);
       this.rows.appendChild(row);
     });
   }
 
-  actionButton(text, label, action) {
+  modelCombobox(value, suffix, label) {
+    const input = window.FccFormControls.configure(document.createElement("input"));
+    input.id = `field-${this.field.key}-${suffix}`;
+    input.type = "text";
+    input.autocomplete = "off";
+    input.placeholder = "provider/model";
+    input.disabled = this.field.locked;
+    input.value = value;
+    input.setAttribute("aria-label", label);
+    return createModelCombobox(input, { ...this.field, key: `${this.field.key}-${suffix}`, label, type: "model" });
+  }
+
+  dropInsertion(event) {
+    const index = Array.from(this.rows.children).findIndex((row) => {
+      const bounds = row.getBoundingClientRect();
+      return event.clientY < bounds.top + bounds.height / 2;
+    });
+    return index === -1 ? this.values.length : index;
+  }
+
+  dropDestination(insertion) {
+    const source = this.values.indexOf(this.draggedEntry);
+    return insertion - (source < insertion ? 1 : 0);
+  }
+
+  clearDropIndicators() {
+    this.rows.querySelectorAll("[data-drop-position]").forEach((row) => delete row.dataset.dropPosition);
+  }
+
+  clearDrag() {
+    this.draggedEntry = null;
+    this.clearDropIndicators();
+    this.rows.querySelectorAll(".dragging").forEach((row) => row.classList.remove("dragging"));
+  }
+
+  effortSelect(value, label) {
+    const select = window.FccFormControls.configure(document.createElement("select"));
+    this.field.options.forEach((item) => select.appendChild(option(item.value, item.label)));
+    select.value = value;
+    select.disabled = this.field.locked;
+    select.setAttribute("aria-label", label);
+    return select;
+  }
+
+  providerId(model) {
+    return model.includes("/") ? model.trim().split("/", 1)[0] : "";
+  }
+
+  keyCount(model) {
+    const providerId = this.providerId(model);
+    const custom = state.config.custom_providers.find((provider) => provider.provider_id === providerId);
+    if (custom) return custom.api_keys.entries.length;
+    const provider = state.config.provider_status.find((item) => item.provider_id === providerId);
+    const credential = provider?.settings_keys.map((key) => state.fields.get(key)).find((field) => field?.type === "api_key_list");
+    return credential ? credential.value.entries.length : null;
+  }
+
+  keySelect(model, value, label) {
+    const select = window.FccFormControls.configure(document.createElement("select"));
+    select.setAttribute("aria-label", label);
+    this.updateKeySelect(select, model, value);
+    return select;
+  }
+
+  updateKeySelect(select, model, value) {
+    const count = this.keyCount(model);
+    select.replaceChildren();
+    if (count === null) {
+      select.appendChild(option(1, this.providerId(model) ? "Default authentication" : "Key 1"));
+    } else {
+      for (let number = 1; number <= Math.max(1, count); number++) select.appendChild(option(number, `Key ${number}`));
+    }
+    if (value > Math.max(1, count ?? 1)) {
+      const unavailable = option(value, `Key ${value} (unavailable)`);
+      unavailable.disabled = true;
+      select.appendChild(unavailable);
+    }
+    select.value = String(value);
+    select.disabled = this.field.locked || count === null || (count === 0 && value === 1);
+  }
+
+  refreshKeyOptions() {
+    this.updateKeySelect(this.addKey, this.addInput.value, Number(this.addKey.value));
+    this.rowKeys.forEach(({ entry, select }) => this.updateKeySelect(select, entry.model, entry.api_key_number ?? 1));
+  }
+
+  actionButton(text, label, action = null) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "ghost-button model-list-action";
     button.textContent = text;
     button.setAttribute("aria-label", label);
-    button.addEventListener("click", action);
+    button.title = label;
+    button.disabled = this.field.locked;
+    if (action) button.addEventListener("click", action);
     return button;
   }
 }
@@ -1169,6 +1371,7 @@ function option(value, label) {
 }
 
 function readFieldValue(input) {
+  if (input.dataset.fieldType === "api_key_list") return JSON.parse(input.value);
   if (input.type === "checkbox") return input.checked ? "true" : "false";
   if (input.dataset.remove === "true") return null;
   if (
@@ -1185,6 +1388,7 @@ function readFieldValue(input) {
 }
 
 function comparableValue(value) {
+  if (value !== null && typeof value === "object") return JSON.stringify(value);
   return value === null ? NULL_VALUE : String(value);
 }
 
@@ -1206,7 +1410,7 @@ function updateDirtyState() {
   byId("dirtyState").textContent =
     state.restart ? "Changes saved" : count === 0 ? "No changes" : `${count} unsaved change${count === 1 ? "" : "s"}`;
   byId("applyButton").disabled = state.applying || (!state.restart && count === 0);
-  byId("saveProvider").disabled = state.applying || !!state.restart || !Object.keys(changedValues(byId("providerFields"))).length;
+  byId("saveProvider").disabled = state.applying || !!state.restart || state.configRefreshRequired || !Object.keys(changedValues(byId("providerFields"))).length;
 }
 
 function clearCredentialError(input) {
@@ -1215,9 +1419,21 @@ function clearCredentialError(input) {
   input.removeAttribute("aria-describedby");
 }
 
-function showCredentialErrors(checks) {
+function credentialEditors() {
+  return [...byId("providerFields").querySelectorAll(".api-key-editor")].map((element) => element.apiKeyEditor);
+}
+
+function showCredentialErrors(checks, rowErrors = []) {
   let first = null;
-  checks.forEach((check) => {
+  [...rowErrors.map((error) => ({ ...error, status: "rejected" })), ...checks].forEach((check) => {
+    const editor = credentialEditors().find((editor) => editor.field.key === check.key);
+    if (editor) {
+      if (check.status === "rejected" || check.status === "unverified") {
+        const input = editor.showResult(check.index, check.message, check.status === "rejected");
+        if (check.status === "rejected") first ||= input;
+      }
+      return;
+    }
     const input = byId(`field-${check.key}`);
     if (!input) return;
     clearCredentialError(input);
@@ -1244,6 +1460,7 @@ function setApplying(applying) {
   byId("closeProviderDialog").disabled = applying;
   byId("cancelProviderDialog").disabled = applying;
   byId("saveProvider").textContent = applying ? "Saving…" : "Save";
+  byId("saveProvider").classList.toggle("startup-busy", applying);
   byId("saveProvider").setAttribute("aria-busy", String(applying));
   byId("applyButton").textContent = state.restart
     ? applying ? "Reconnecting…" : "Reconnect"
@@ -1287,7 +1504,7 @@ async function reconnectAfterRestart() {
   state.startupRequest?.controller.abort();
   state.startupRequest = null;
   state.startupAgain = false;
-  const { restart, warnings, providersOnly } = state.restart;
+  const { restart, warnings, providersOnly, providerId, checks } = state.restart;
   const target = new URL(restart.admin_url || "/admin", window.location.href);
   setApplying(true);
   showMessage(["Applied. Reconnecting to the server…", ...warnings].join("\n"), warnings.length ? "warn" : "ok");
@@ -1295,7 +1512,7 @@ async function reconnectAfterRestart() {
     await waitForRestart(restart, target);
     if (target.origin !== window.location.origin) {
       // Carry only the safe warning text across an address change, never edits.
-      target.hash = new URLSearchParams({ "fcc-applied": JSON.stringify(warnings) }).toString();
+      target.hash = new URLSearchParams({ "fcc-applied": JSON.stringify(warnings), ...(providerId ? { "fcc-provider": providerId, "fcc-checks": JSON.stringify(checks) } : {}) }).toString();
       window.location.replace(target.href);
       return;
     }
@@ -1303,7 +1520,9 @@ async function reconnectAfterRestart() {
     state.restart = null;
     void refreshStartup();
     showMessage(["Applied", ...warnings].join("\n"), warnings.length ? "warn" : "ok");
+    if (providerId) await restoreSavedProvider(providerId, checks);
   } catch (error) {
+    state.configRefreshRequired = true;
     showMessage([`Settings were saved. ${error.message} Use Reconnect to try again.`, ...warnings].join("\n"), "warn");
     appendAdminLink(target);
   } finally {
@@ -1311,22 +1530,38 @@ async function reconnectAfterRestart() {
   }
 }
 
-function showRestartNotice() {
+async function showRestartNotice() {
   const url = new URL(window.location.href);
   const fragment = new URLSearchParams(url.hash.slice(1));
   const notice = fragment.get("fcc-applied");
   if (notice === null) return;
   fragment.delete("fcc-applied");
+  const providerId = fragment.get("fcc-provider");
+  const checks = fragment.get("fcc-checks");
+  fragment.delete("fcc-provider");
+  fragment.delete("fcc-checks");
   url.hash = fragment.toString();
   window.history.replaceState(window.history.state, "", url);
   try {
     const warnings = JSON.parse(notice);
     if (Array.isArray(warnings) && warnings.every((warning) => typeof warning === "string")) {
       showMessage(["Applied", ...warnings].join("\n"), warnings.length ? "warn" : "ok");
+      if (providerId && checks) {
+        const parsed = JSON.parse(checks);
+        if (Array.isArray(parsed) && parsed.every((check) => check && typeof check.key === "string" && Number.isInteger(check.index) && typeof check.message === "string" && check.status === "unverified")) await restoreSavedProvider(providerId, parsed);
+      }
     }
   } catch {
     // A malformed navigation notice must not prevent normal Admin use.
   }
+}
+
+async function restoreSavedProvider(providerId, checks) {
+  if (!connectedAccountDescriptor(providerId)) return;
+  await openProviderDialog(providerId);
+  showCredentialErrors(checks);
+  byId("providerMessage").textContent = "Saved. Some keys could not be verified.";
+  byId("providerMessage").className = "message-area warn";
 }
 
 async function apply(providerId = null, customAction = null) {
@@ -1335,20 +1570,31 @@ async function apply(providerId = null, customAction = null) {
     await reconnectAfterRestart();
     return;
   }
+  if (providerId && state.configRefreshRequired) return;
   const values = changedValues(providerId ? byId("providerFields") : byId("adminViews"));
   const custom = providerId && state.customProvider;
+  const action = customAction || (custom?.provider_id ? "update" : "create");
+  if (!Object.keys(values).length && !(custom && action === "delete")) return;
+  if (providerId && action !== "delete") {
+    let invalid = null;
+    for (const editor of credentialEditors()) {
+      const input = editor.validate();
+      invalid ||= input;
+      values[editor.field.key] = editor.payload();
+    }
+    if (invalid) {
+      showMessage("Check the highlighted API key rows.", "error");
+      invalid.focus();
+      return;
+    }
+  }
   let mutation = null;
   if (custom) {
-    const action = customAction || (custom.provider_id ? "update" : "create");
     if ("model_ids" in values) values.model_ids = values.model_ids.split(/\r?\n/).map((id) => id.trim()).filter(Boolean);
     mutation = { action, values: action === "delete" ? {} : values };
     if (custom.provider_id) mutation.provider_id = custom.provider_id;
   }
-  if (!Object.keys(values).length && mutation?.action !== "delete") return;
-  const checkingKeys = Object.keys(values).some((key) => {
-    const field = state.fields.get(key);
-    return field?.secret && field.section === "providers" && values[key] !== null;
-  });
+  const checkingKeys = credentialEditors().some((editor) => values[editor.field.key]?.entries.length);
   let rejectedField = null;
   let applied = false;
   setApplying(true);
@@ -1360,29 +1606,39 @@ async function apply(providerId = null, customAction = null) {
     });
     const checks = result.credential_checks || [];
     if (!result.applied) {
-      rejectedField = showCredentialErrors(checks);
-      showMessage(rejectedField ? "Not applied. Check the highlighted API keys." : result.errors.join("; "), "error");
+      rejectedField = showCredentialErrors(checks, result.credential_row_errors || []);
+      showMessage(rejectedField ? "Not applied. Check the highlighted API keys." : (result.errors || []).join("; "), "error");
       return;
     }
     applied = true;
-    if (providerId) byId("providerDialog").close();
-    const warnings = checks.filter((check) => check.status === "unverified").map((check) =>
-      `${state.fields.get(check.key)?.label || check.key}: ${check.message}`
+    const warningChecks = checks.filter((check) => check.status === "unverified");
+    const warnings = warningChecks.map((check) =>
+      `${state.fields.get(check.key)?.label || "API keys"}, Key ${check.index + 1}: ${check.message}`
     );
+    const savedProviderId = warnings.length && providerId && mutation?.action !== "delete" ? result.custom_provider_id || providerId : null;
+    if (providerId && !savedProviderId) byId("providerDialog").close();
     const restart = result.restart || {};
     if (restart.required && restart.automatic) {
-      state.restart = { restart, warnings, providersOnly: !!providerId };
+      if (providerId) byId("providerDialog").close();
+      state.restart = { restart, warnings, providersOnly: !!providerId, providerId: savedProviderId, checks: warningChecks };
       await reconnectAfterRestart();
       return;
     }
     const pending = restart.required ? restart.fields || [] : result.pending_fields || [];
     await load({ providersOnly: !!providerId });
+    if (savedProviderId) await restoreSavedProvider(savedProviderId, warningChecks);
     const message = pending.length
       ? `Applied. Restart fcc-server to use: ${pending.join(", ")}`
       : "Applied";
     showMessage([message, ...warnings].join("\n"), warnings.length ? "warn" : "ok");
+    if (savedProviderId) {
+      byId("providerMessage").textContent = `Saved${pending.length ? ". Restart required" : ""}. Some keys could not be verified.`;
+      byId("providerMessage").className = "message-area warn";
+    }
   } catch (error) {
+    if (providerId && (applied || error.status === 409 || !error.status || error.status >= 500)) state.configRefreshRequired = true;
     showMessage(applied ? `Applied, but could not reload settings: ${error.message}` : `Could not apply settings: ${error.message}`, "error");
+    if (providerId && state.configRefreshRequired) byId("providerMessage").append(" Close and reopen this modal to load saved settings before saving again.");
   } finally {
     setApplying(false);
     if (rejectedField) {
@@ -1390,7 +1646,7 @@ async function apply(providerId = null, customAction = null) {
       rejectedField.closest(".settings-section")?.classList.add("show-advanced");
       rejectedField.scrollIntoView({ block: "center", behavior: "instant" });
       rejectedField.focus();
-    } else if (providerId && applied) {
+    } else if (providerId && applied && !byId("providerDialog").open) {
       const focus = mutation && mutation.action !== "update"
         ? byId("addCustomProvider")
         : document.querySelector(`[data-provider="${providerId}"] [data-provider-settings]`);
@@ -1594,6 +1850,96 @@ try {
 const claudeIntegrationDialog = byId("claudeIntegrationDialog");
 const claudeIntegration = { connected: null, busy: false, paths: null, update: null };
 const claudeIntegrationPath = "/admin/api/integrations/claude-vscode";
+const claudeOnboardingDialog = byId("claudeOnboardingDialog");
+const claudeOnboarding = { completed: null, busy: false, paths: null, refreshAfterSave: false };
+const claudeOnboardingPath = "/admin/api/integrations/claude-onboarding";
+
+function renderClaudeOnboarding() {
+  const { completed, busy, paths, checkRequest } = claudeOnboarding;
+  const button = byId("openClaudeOnboarding");
+  button.textContent = busy ? checkRequest ? "Loading…" : "Saving…" : completed === null ? "Retry" : completed ? "Completed" : "Complete onboarding";
+  button.disabled = busy || completed === true;
+  button.setAttribute("aria-busy", String(busy));
+  const action = byId("confirmClaudeOnboarding");
+  action.textContent = busy ? "Saving…" : "Complete onboarding";
+  action.disabled = busy || completed !== false;
+  const files = byId("claudeOnboardingFiles");
+  files.replaceChildren();
+  if (paths) {
+    const item = document.createElement("li");
+    const code = document.createElement("code");
+    code.textContent = paths.claude_state;
+    item.appendChild(code);
+    files.appendChild(item);
+  }
+}
+
+async function refreshClaudeOnboarding({ replaceCheck = false } = {}) {
+  if (claudeOnboarding.busy && !claudeOnboarding.checkRequest) {
+    claudeOnboarding.refreshAfterSave = true;
+    return;
+  }
+  if (replaceCheck && claudeOnboarding.checkRequest) {
+    claudeOnboarding.checkRequest = null;
+    claudeOnboarding.busy = false;
+  }
+  const request = beginIntegrationCheck(claudeOnboarding);
+  if (!request) return;
+  renderClaudeOnboarding();
+  try {
+    const result = await api(claudeOnboardingPath);
+    if (!currentIntegrationCheck(claudeOnboarding, request)) return;
+    claudeOnboarding.completed = result.completed;
+    claudeOnboarding.paths = result.paths;
+    integrationMessage("claudeOnboardingMessage", "");
+  } catch (error) {
+    if (!currentIntegrationCheck(claudeOnboarding, request)) return;
+    claudeOnboarding.completed = null;
+    integrationMessage("claudeOnboardingMessage", error.message, true);
+  } finally {
+    finishIntegrationCheck(claudeOnboarding, request, renderClaudeOnboarding);
+  }
+}
+
+byId("openClaudeOnboarding").addEventListener("click", () => {
+  if (claudeOnboarding.completed === null) {
+    void refreshClaudeOnboarding();
+    return;
+  }
+  integrationMessage("claudeOnboardingDialogMessage", "");
+  claudeOnboardingDialog.showModal();
+});
+byId("confirmClaudeOnboarding").addEventListener("click", async () => {
+  if (byId("confirmClaudeOnboarding").disabled) return;
+  claudeOnboarding.busy = true;
+  renderClaudeOnboarding();
+  integrationMessage("claudeOnboardingDialogMessage", "");
+  integrationMessage("claudeOnboardingMessage", "");
+  try {
+    const result = await api(`${claudeOnboardingPath}/complete`, { method: "POST" });
+    claudeOnboarding.completed = result.completed;
+    claudeOnboardingDialog.close();
+    integrationMessage("claudeOnboardingMessage", "Claude onboarding completed.");
+  } catch (error) {
+    integrationMessage("claudeOnboardingDialogMessage", error.message, true);
+    integrationMessage("claudeOnboardingMessage", error.message, true);
+  } finally {
+    claudeOnboarding.busy = false;
+    renderClaudeOnboarding();
+    if (claudeOnboarding.refreshAfterSave) {
+      claudeOnboarding.refreshAfterSave = false;
+      void refreshClaudeOnboarding();
+    }
+  }
+});
+byId("closeClaudeOnboarding").addEventListener("click", () => claudeOnboardingDialog.close());
+claudeOnboardingDialog.addEventListener("click", (event) => {
+  if (event.target !== claudeOnboardingDialog) return;
+  const bounds = claudeOnboardingDialog.getBoundingClientRect();
+  if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) {
+    claudeOnboardingDialog.close();
+  }
+});
 
 function integrationMessage(id, message, error = false) {
   const element = byId(id);
@@ -1665,7 +2011,7 @@ function renderClaudeIntegration() {
   byId("openClaudeIntegration").className = connected && !busy ? "danger-button" : "primary-button";
   byId("confirmClaudeIntegration").className = connected ? "danger-button" : "primary-button";
   byId("claudeIntegrationDescription").textContent = connected
-    ? "Remove FCC's VS Code settings. Claude onboarding stays completed."
+    ? "Remove FCC's VS Code settings."
     : "Will set FCC's URL and token, enable model discovery, skip VS Code login, and complete Claude onboarding.";
   const files = byId("claudeIntegrationFiles");
   files.replaceChildren();
@@ -1734,6 +2080,7 @@ byId("confirmClaudeIntegration").addEventListener("click", async () => {
   } finally {
     claudeIntegration.busy = false;
     renderClaudeIntegration();
+    if (!disconnect) void refreshClaudeOnboarding({ replaceCheck: true });
   }
 });
 byId("closeClaudeIntegration").addEventListener("click", () => claudeIntegrationDialog.close());

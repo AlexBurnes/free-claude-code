@@ -24,6 +24,7 @@ from free_claude_code.application.model_catalog import read_model_catalog
 from free_claude_code.application.model_metadata import ProviderModelRefreshResult
 from free_claude_code.config.admin.custom_providers import CustomProviderMutation
 from free_claude_code.config.admin.manifest import FIELD_BY_KEY
+from free_claude_code.config.errors import ConfigConflictError
 from free_claude_code.config.provider_catalog import (
     PROVIDER_CATALOG,
     ProviderAuthKind,
@@ -58,6 +59,7 @@ _ADMIN_ASSET_FILENAMES = frozenset(
         "session_ui.js",
         "model_combobox.js",
         "profiles.js",
+        "api_key_editor.js",
         *(
             f"providers/{provider.logo_filename}"
             for provider in PROVIDER_CATALOG.values()
@@ -77,7 +79,7 @@ _LOCAL_PROVIDER_CHECK_FAILURE_MESSAGE = (
 class AdminConfigPayload(BaseModel):
     """Partial config update submitted by the admin UI."""
 
-    values: JsonObject = Field(default_factory=dict)
+    values: JsonObject = Field(default_factory=dict, repr=False)
     custom_provider: CustomProviderMutation | None = None
 
 
@@ -145,12 +147,14 @@ async def apply_admin_config(
     services: ApiServices = Depends(get_services),
 ):
     require_loopback_admin(request)
-    if payload.custom_provider is not None:
-        return await services.admin.apply_admin_config(
-            _filtered_values(payload.values), payload.custom_provider
-        )
-    result = await services.admin.apply_admin_config(_filtered_values(payload.values))
-    return result
+    try:
+        if payload.custom_provider is not None:
+            return await services.admin.apply_admin_config(
+                _filtered_values(payload.values), payload.custom_provider
+            )
+        return await services.admin.apply_admin_config(_filtered_values(payload.values))
+    except ConfigConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
 @router.get("/admin/api/status")
@@ -265,6 +269,24 @@ async def models(
 ):
     require_loopback_admin(request)
     return _model_options(services)
+
+
+@router.get("/admin/api/integrations/claude-onboarding")
+async def claude_onboarding_status(
+    request: Request,
+    services: ApiServices = Depends(get_services),
+):
+    require_loopback_admin(request)
+    return await _integration_response(services.admin.claude_onboarding_status)
+
+
+@router.post("/admin/api/integrations/claude-onboarding/complete")
+async def complete_claude_onboarding(
+    request: Request,
+    services: ApiServices = Depends(get_services),
+):
+    require_loopback_admin(request)
+    return await _integration_response(services.admin.complete_claude_onboarding)
 
 
 @router.get("/admin/api/integrations/claude-vscode")

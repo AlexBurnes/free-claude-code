@@ -187,7 +187,7 @@ def settings_report(settings: Settings, accounts: dict[str, str]) -> dict[str, A
             "configured": True,
             "referenced": definition.provider_id in referenced,
             "base_url": _url_summary(definition.base_url),
-            "api_key_configured": bool(definition.api_key),
+            "api_key_configured": bool(definition.api_keys),
             "api_format": definition.api_format,
             "reasoning_format": definition.reasoning_format,
             "reasoning_history_format": definition.reasoning_history_format,
@@ -199,7 +199,7 @@ def settings_report(settings: Settings, accounts: dict[str, str]) -> dict[str, A
     return {
         "providers": providers,
         "runtime": runtime,
-        "model_routing": {name: getattr(settings, name) for name in ROUTING_FIELDS},
+        "model_routing": settings.model_dump(mode="json", include=set(ROUTING_FIELDS)),
         "reasoning": {name: getattr(settings, name) for name in REASONING_FIELDS},
         "web_tools": {name: getattr(settings, name) for name in WEB_FIELDS},
     }
@@ -213,7 +213,6 @@ def integration_report(settings: Settings) -> dict[str, Any]:
         ),
         "claude-vscode": lambda: claude_integration.configure(
             claude_integration.settings_path(),
-            claude_integration.claude_state_path(),
             url,
             token,
         ),

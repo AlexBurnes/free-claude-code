@@ -111,12 +111,14 @@ def create_app(
             message_summary=message_summary,
             tool_names=tool_names,
         )
-        if request.url.path.startswith(("/admin/api/profiles", "/api/launch-sessions")):
+        if request.url.path == "/admin/api/config/apply" or request.url.path.startswith(
+            ("/admin/api/profiles", "/api/launch-sessions")
+        ):
             return JSONResponse(
                 status_code=422,
                 content={
                     "detail": [
-                        {key: error[key] for key in ("type", "loc", "msg")}
+                        {key: error[key] for key in ("loc", "msg", "type")}
                         for error in exc.errors()
                     ]
                 },

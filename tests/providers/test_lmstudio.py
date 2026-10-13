@@ -272,7 +272,7 @@ def test_build_request_body_never_replays_prior_thinking(lmstudio_provider):
 
     roles = [m.get("role") for m in body.get("messages", [])]
     assert "assistant_reasoning_content" not in roles
-    assert "[Earlier reasoning]" in str(body)
+    assert "[Earlier reasoning]" not in str(body)
     assert "prior reasoning" in str(body)
 
 
@@ -435,7 +435,7 @@ async def test_primary_context_validation_counts_toward_progress_timeout(
         fallback = FakeProvider() if wire == "messages" else ResponsesFakeProvider()
         providers = {"provider": provider, "fallback": fallback}
         executor = ProviderExecutor(
-            AsyncMock(side_effect=lambda name: providers[name]),
+            AsyncMock(side_effect=lambda name, _api_key_number: providers[name]),
             progress_timeout_seconds=0.05,
         )
         route = _routed_request if wire == "messages" else _routed_responses_request
@@ -910,7 +910,7 @@ async def test_context_rejection_before_first_event_allows_fallback(wire):
         fallback = FakeProvider() if wire == "messages" else ResponsesFakeProvider()
         providers = {"provider": provider, "fallback": fallback}
         executor = ProviderExecutor(
-            AsyncMock(side_effect=lambda name: providers[name]),
+            AsyncMock(side_effect=lambda name, _api_key_number: providers[name]),
             progress_timeout_seconds=2,
         )
         route = _routed_request if wire == "messages" else _routed_responses_request

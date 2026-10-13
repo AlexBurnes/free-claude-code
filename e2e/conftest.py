@@ -12,6 +12,7 @@ import pytest
 import uvicorn
 from playwright.sync_api import Page
 
+from e2e.artifacts import failure_artifacts_recorder as failure_artifacts_recorder
 from e2e.code_support import CodeControl
 from e2e.server_shutdown import join_server
 from free_claude_code.api.app import create_app
@@ -31,11 +32,16 @@ from free_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningP
 from free_claude_code.harnesses import (
     claude_desktop_integration,
     claude_integration,
+    claude_onboarding,
     codex_integration,
     jetbrains_acp_integration,
     vscode_chat_integration,
 )
 from free_claude_code.providers.base import BaseProvider, ProviderConfig
+from free_claude_code.providers.credential_validation import (
+    CredentialCheck,
+    CredentialStatus,
+)
 from free_claude_code.providers.runtime import ProviderRuntime
 from free_claude_code.runtime.application import ApplicationRuntime
 from free_claude_code.runtime.asgi import RuntimeASGIApp
@@ -193,7 +199,7 @@ def admin_base_url(
         lambda: tmp_path / "vscode/chatLanguageModels.json",
     )
     monkeypatch.setattr(
-        claude_integration, "claude_state_path", lambda: tmp_path / ".claude.json"
+        claude_onboarding, "state_path", lambda: tmp_path / ".claude.json"
     )
     monkeypatch.setattr(
         claude_integration,
@@ -219,6 +225,23 @@ def admin_base_url(
     monkeypatch.setattr(env_migrations, "legacy_env_paths", lambda: ())
     monkeypatch.setattr(env_migrations, "verified_checkout_env_path", lambda: None)
     clear_settings_cache()
+
+    async def verified_credentials(settings, submissions):
+        return tuple(
+            CredentialCheck(
+                submission.key,
+                CredentialStatus.VERIFIED,
+                "API key accepted.",
+                index,
+                submission.provider_id,
+            )
+            for submission in submissions
+            for index, _ in enumerate(submission.credentials)
+        )
+
+    monkeypatch.setattr(
+        "free_claude_code.runtime.application.check_credentials", verified_credentials
+    )
 
     store = ManagedConfigStore()
     store.initialize({})
@@ -254,7 +277,7 @@ def admin_base_url(
     }
 
     async def fixture_provider(
-        provider_id: str, _settings: Settings, _admission_registry
+        provider_id: str, _settings: Settings, _admission_registry, _api_key_number
     ) -> BaseProvider:
         if provider_id not in providers:
             raise AssertionError(f"Missing browser fixture provider: {provider_id}")
@@ -265,7 +288,7 @@ def admin_base_url(
         runtime_factory=lambda snapshot, admission_registry: ProviderRuntime(
             snapshot,
             admission_registry,
-            dict(providers),
+            {(provider_id, 1): provider for provider_id, provider in providers.items()},
             provider_constructor=fixture_provider,
         ),
     )
@@ -373,3 +396,6 @@ def close_browser_connections_before_server_teardown(
     yield
     if not page.is_closed():
         page.goto("about:blank")
+        # Context disposal can otherwise leak an unfinished route.fetch() error
+        # into the next test's Playwright call.
+        page.unroute_all(behavior="ignoreErrors")

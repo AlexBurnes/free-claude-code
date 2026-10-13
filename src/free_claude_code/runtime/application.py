@@ -288,13 +288,21 @@ class ApplicationRuntime:
                 return prepared.applied_response() | {"credential_checks": []}
             assert prepared.settings is not None
 
-            checks = await check_credentials(prepared.settings, prepared.changed_keys)
+            checks = await check_credentials(
+                prepared.settings, prepared.credential_submissions
+            )
             check_response: list[JsonObject] = [
                 {
                     "key": check.key,
+                    "index": check.index,
                     "status": check.status.value,
                     "message": check.message,
                 }
+                | (
+                    {"provider_id": check.provider_id}
+                    if check.provider_id is not None
+                    else {}
+                )
                 for check in checks
             ]
             rejected = [
@@ -304,7 +312,10 @@ class ApplicationRuntime:
                 return prepared.validation_response() | {
                     "applied": False,
                     "valid": False,
-                    "errors": [f"{check.key}: {check.message}" for check in rejected],
+                    "errors": [
+                        f"{check.key} Key {check.index + 1}: {check.message}"
+                        for check in rejected
+                    ],
                     "pending_fields": [],
                     "credential_checks": check_response,
                 }
@@ -379,6 +390,12 @@ class ApplicationRuntime:
 
     async def claude_vscode_status(self) -> JsonObject:
         return await self._integrations.claude_vscode_status()
+
+    async def claude_onboarding_status(self) -> JsonObject:
+        return await self._integrations.claude_onboarding_status()
+
+    async def complete_claude_onboarding(self) -> JsonObject:
+        return await self._integrations.complete_claude_onboarding()
 
     async def connect_claude_vscode(self) -> JsonObject:
         return await self._integrations.connect_claude_vscode()

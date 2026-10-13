@@ -48,6 +48,15 @@ class ProviderModelTarget:
     provider_id: str
     provider_model: str
     provider_model_ref: str
+    api_key_number: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderModelCandidate:
+    """One execution target with a candidate-local reasoning preference."""
+
+    target: ProviderModelTarget
+    reasoning_preference: ReasoningPreference = ReasoningPreference.INHERIT
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +65,7 @@ class ResolvedModelRoute:
 
     original_model: str
     primary: ProviderModelTarget
-    fallbacks: tuple[ProviderModelTarget, ...]
+    fallbacks: tuple[ProviderModelCandidate, ...]
     reasoning_preference: ReasoningPreference
 
 
@@ -140,13 +149,18 @@ class ModelRouter:
             reasoning_preference=reasoning_preference,
         )
 
-    def _target_from_ref(self, provider_model_ref: str) -> ProviderModelTarget:
+    def _target_from_ref(
+        self, provider_model_ref: str, api_key_number: int = 1
+    ) -> ProviderModelTarget:
         return self._target(
             parse_provider_type(provider_model_ref),
             parse_model_name(provider_model_ref),
+            api_key_number,
         )
 
-    def _target(self, provider_id: str, provider_model: str) -> ProviderModelTarget:
+    def _target(
+        self, provider_id: str, provider_model: str, api_key_number: int = 1
+    ) -> ProviderModelTarget:
         self._validate_provider_id(provider_id)
         self._validate_profile_model(f"{provider_id}/{provider_model}")
         logger.info(
@@ -159,16 +173,22 @@ class ModelRouter:
             provider_id=provider_id,
             provider_model=provider_model,
             provider_model_ref=f"{provider_id}/{provider_model}",
+            api_key_number=api_key_number,
         )
 
     def _fallback_targets(
         self, primary: ProviderModelTarget
-    ) -> tuple[ProviderModelTarget, ...]:
+    ) -> tuple[ProviderModelCandidate, ...]:
         configured = tuple(
-            self._target_from_ref(model_ref)
-            for model_ref in self._settings.model_fallbacks or ()
+            ProviderModelCandidate(
+                self._target_from_ref(entry.model, entry.api_key_number),
+                entry.reasoning,
+            )
+            for entry in self._settings.model_fallbacks or ()
         )
-        return tuple(target for target in configured if target != primary)
+        return tuple(
+            candidate for candidate in configured if candidate.target != primary
+        )
 
     def _validate_provider_id(self, provider_id: str) -> None:
         if provider_id not in self._settings.provider_ids:
@@ -270,9 +290,9 @@ class ModelRouter:
         resolved: ResolvedModelRoute,
     ) -> RoutedNativeMessagesRequest:
         eligible = tuple(
-            target
-            for target in resolved.fallbacks
-            if supports_native_messages(target.provider_id)
+            candidate
+            for candidate in resolved.fallbacks
+            if supports_native_messages(candidate.target.provider_id)
         )
         trace_event(
             stage="routing",
@@ -280,9 +300,9 @@ class ModelRouter:
             source="application",
             contract="native",
             excluded_fallbacks=tuple(
-                target.provider_model_ref
-                for target in resolved.fallbacks
-                if target not in eligible
+                candidate.target.provider_model_ref
+                for candidate in resolved.fallbacks
+                if candidate not in eligible
             ),
         )
         return RoutedNativeMessagesRequest(
